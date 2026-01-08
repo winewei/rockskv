@@ -1,0 +1,37 @@
+# Storage Node Configuration
+node_id: "storage-1"
+listen_addr: ":9001"
+metadata_addr: "localhost:9000"
+sst_dir: "/tmp/rockskv/sst"
+
+# RocksDB Configuration
+rocksdb:
+  # Data directory (recommend NVMe for performance)
+  data_dir: "/data/rockskv"
+
+  # WAL directory (recommend EBS for durability)
+  wal_dir: "/data/rockskv/wal"
+
+  # Block cache size (60% of available memory recommended)
+  block_cache_size: 536870912  # 512MB
+
+  # Write buffer size
+  write_buffer_size: 67108864  # 64MB
+
+  # Maximum number of write buffers
+  max_write_buffer_number: 4
+
+  # Background compaction threads (half of CPU cores recommended)
+  max_background_compactions: 4
+
+  # Background flush threads
+  max_background_flushes: 2
+
+  # Target file size for L1
+  target_file_size_base: 67108864  # 64MB
+
+  # Maximum bytes for L1
+  max_bytes_for_level_base: 268435456  # 256MB
+
+  # Compression type: lz4, zstd, snappy, none
+  compression_type: "lz4"

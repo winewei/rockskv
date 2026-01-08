@@ -1,0 +1,21 @@
+# Compute Node Configuration
+node_id: "compute-1"
+listen_addr: ":8000"
+metadata_addr: "localhost:9000"
+
+# Connection Pool Configuration
+pool:
+  # Maximum connections per storage host
+  max_conns_per_host: 10
+
+  # Idle connection timeout
+  idle_timeout: "5m"
+
+  # Connection dial timeout
+  dial_timeout: "5s"
+
+  # Keep-alive time
+  keep_alive_time: "10s"
+
+  # Keep-alive timeout
+  keep_alive_timeout: "5s"
