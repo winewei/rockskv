@@ -8,6 +8,7 @@ on:
 
 env:
   GO_VERSION: '1.21'
+  ROCKSDB_VERSION: '9.11.2'
 
 jobs:
   # Build and test without CGO (stub implementation)
@@ -66,13 +67,32 @@ jobs:
           liblz4-dev \
           libzstd-dev
 
+    - name: Cache RocksDB
+      id: cache-rocksdb
+      uses: actions/cache@v4
+      with:
+        path: /usr/local/lib/librocksdb*
+        key: rocksdb-${{ env.ROCKSDB_VERSION }}-ubuntu-22.04-v2
+
+    - name: Cache RocksDB headers
+      id: cache-rocksdb-headers
+      uses: actions/cache@v4
+      with:
+        path: /usr/local/include/rocksdb
+        key: rocksdb-headers-${{ env.ROCKSDB_VERSION }}-ubuntu-22.04-v2
+
     - name: Install RocksDB from source
+      if: steps.cache-rocksdb.outputs.cache-hit != 'true'
       run: |
-        git clone --depth 1 --branch v8.1.1 https://github.com/facebook/rocksdb.git /tmp/rocksdb
+        git clone --depth 1 --branch v${{ env.ROCKSDB_VERSION }} https://github.com/facebook/rocksdb.git /tmp/rocksdb
         cd /tmp/rocksdb
         make shared_lib -j$(nproc)
         sudo make install-shared INSTALL_PATH=/usr/local
         sudo ldconfig
+
+    - name: Update library cache
+      if: steps.cache-rocksdb.outputs.cache-hit == 'true'
+      run: sudo ldconfig
 
     - name: Set library path
       run: |
@@ -148,13 +168,32 @@ jobs:
           liblz4-dev \
           libzstd-dev
 
+    - name: Cache RocksDB
+      id: cache-rocksdb
+      uses: actions/cache@v4
+      with:
+        path: /usr/local/lib/librocksdb*
+        key: rocksdb-${{ env.ROCKSDB_VERSION }}-ubuntu-22.04-v2
+
+    - name: Cache RocksDB headers
+      id: cache-rocksdb-headers
+      uses: actions/cache@v4
+      with:
+        path: /usr/local/include/rocksdb
+        key: rocksdb-headers-${{ env.ROCKSDB_VERSION }}-ubuntu-22.04-v2
+
     - name: Install RocksDB from source
+      if: steps.cache-rocksdb.outputs.cache-hit != 'true'
       run: |
-        git clone --depth 1 --branch v8.1.1 https://github.com/facebook/rocksdb.git /tmp/rocksdb
+        git clone --depth 1 --branch v${{ env.ROCKSDB_VERSION }} https://github.com/facebook/rocksdb.git /tmp/rocksdb
         cd /tmp/rocksdb
         make shared_lib -j$(nproc)
         sudo make install-shared INSTALL_PATH=/usr/local
         sudo ldconfig
+
+    - name: Update library cache
+      if: steps.cache-rocksdb.outputs.cache-hit == 'true'
+      run: sudo ldconfig
 
     - name: Set library path
       run: |
