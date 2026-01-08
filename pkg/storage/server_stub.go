@@ -1,18 +1,15 @@
-//go:build cgo && !nocgo
-// +build cgo,!nocgo
+//go:build !cgo || nocgo
+// +build !cgo nocgo
 
 package storage
 
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/linxGnu/grocksdb"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -61,7 +58,7 @@ func NewServer(config *ServerConfig) (*Server, error) {
 
 	logger := common.NewLogger("storage-server")
 
-	// Initialize RocksDB
+	// Initialize RocksDB (stub)
 	db, err := NewRocksDB(config.RocksDB)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize rocksdb: %w", err)
@@ -98,7 +95,7 @@ func (s *Server) Start() error {
 	)
 	pb.RegisterStorageServiceServer(s.grpcServer, s)
 
-	s.logger.Info("Storage server starting",
+	s.logger.Info("Storage server starting (stub mode)",
 		zap.String("addr", s.config.ListenAddr),
 		zap.String("node_id", s.config.NodeID),
 	)
@@ -170,7 +167,6 @@ func (s *Server) Get(ctx context.Context, req *pb.StorageGetRequest) (*pb.Storag
 		common.StorageLatency.WithLabelValues("get").Observe(time.Since(start).Seconds())
 	}()
 
-	// Check if we have the partition
 	if !s.partitionManager.HasPartition(req.PartitionId) {
 		common.StorageOperations.WithLabelValues("get", "partition_not_found").Inc()
 		return &pb.StorageGetResponse{
@@ -215,7 +211,6 @@ func (s *Server) Put(ctx context.Context, req *pb.StoragePutRequest) (*pb.Storag
 		common.StorageLatency.WithLabelValues("put").Observe(time.Since(start).Seconds())
 	}()
 
-	// Check if we have the partition
 	if !s.partitionManager.HasPartition(req.PartitionId) {
 		common.StorageOperations.WithLabelValues("put", "partition_not_found").Inc()
 		return &pb.StoragePutResponse{
@@ -250,7 +245,6 @@ func (s *Server) Delete(ctx context.Context, req *pb.StorageDeleteRequest) (*pb.
 		common.StorageLatency.WithLabelValues("delete").Observe(time.Since(start).Seconds())
 	}()
 
-	// Check if we have the partition
 	if !s.partitionManager.HasPartition(req.PartitionId) {
 		common.StorageOperations.WithLabelValues("delete", "partition_not_found").Inc()
 		return &pb.StorageDeleteResponse{
@@ -285,7 +279,6 @@ func (s *Server) BatchPut(ctx context.Context, req *pb.StorageBatchPutRequest) (
 		common.StorageLatency.WithLabelValues("batch_put").Observe(time.Since(start).Seconds())
 	}()
 
-	// Check if we have the partition
 	if !s.partitionManager.HasPartition(req.PartitionId) {
 		common.StorageOperations.WithLabelValues("batch_put", "partition_not_found").Inc()
 		return &pb.StorageBatchPutResponse{
@@ -323,177 +316,14 @@ func (s *Server) BatchPut(ctx context.Context, req *pb.StorageBatchPutRequest) (
 	}, nil
 }
 
-// ExportSST implements StorageService.ExportSST
+// ExportSST implements StorageService.ExportSST (stub)
 func (s *Server) ExportSST(req *pb.ExportSSTRequest, stream pb.StorageService_ExportSSTServer) error {
-	// Check if we have the partition
-	if !s.partitionManager.HasPartition(req.PartitionId) {
-		return status.Errorf(codes.NotFound, "partition %d not found", req.PartitionId)
-	}
-
-	// Mark partition as migrating out
-	if err := s.partitionManager.SetPartitionStatus(req.PartitionId, pb.PartitionStatus_MIGRATING_OUT); err != nil {
-		return status.Errorf(codes.Internal, "failed to set partition status: %v", err)
-	}
-
-	// Create SST file
-	sstPath := filepath.Join(s.config.SSTDir, fmt.Sprintf("partition_%d_%d.sst", req.PartitionId, time.Now().UnixNano()))
-
-	// Create SST writer
-	envOpts := grocksdb.NewDefaultEnvOptions()
-	opts := grocksdb.NewDefaultOptions()
-	sstWriter := grocksdb.NewSSTFileWriter(envOpts, opts)
-	defer sstWriter.Destroy()
-
-	if err := sstWriter.Open(sstPath); err != nil {
-		return status.Errorf(codes.Internal, "failed to open sst writer: %v", err)
-	}
-
-	// Create snapshot and iterate partition data
-	snapshot := s.db.CreateSnapshot()
-	defer s.db.ReleaseSnapshot(snapshot)
-
-	iter := s.db.NewIteratorWithSnapshot(snapshot)
-	defer iter.Close()
-
-	startKey, endKey := GetPartitionRange(req.PartitionId)
-
-	keyCount := int64(0)
-	for iter.Seek(startKey); iter.Valid(); iter.Next() {
-		key := iter.Key()
-		if compareBytes(key.Data(), endKey) >= 0 {
-			key.Free()
-			break
-		}
-
-		value := iter.Value()
-		if err := sstWriter.Put(key.Data(), value.Data()); err != nil {
-			key.Free()
-			value.Free()
-			return status.Errorf(codes.Internal, "failed to write to sst: %v", err)
-		}
-		key.Free()
-		value.Free()
-		keyCount++
-	}
-
-	if err := iter.Err(); err != nil {
-		return status.Errorf(codes.Internal, "iterator error: %v", err)
-	}
-
-	if err := sstWriter.Finish(); err != nil {
-		return status.Errorf(codes.Internal, "failed to finish sst: %v", err)
-	}
-
-	s.logger.Info("SST file created",
-		zap.Uint32("partition_id", req.PartitionId),
-		zap.String("path", sstPath),
-		zap.Int64("keys", keyCount),
-	)
-
-	// Stream SST file
-	file, err := os.Open(sstPath)
-	if err != nil {
-		return status.Errorf(codes.Internal, "failed to open sst file: %v", err)
-	}
-	defer file.Close()
-	defer os.Remove(sstPath)
-
-	filename := filepath.Base(sstPath)
-	buffer := make([]byte, 64*1024) // 64KB chunks
-
-	for {
-		n, err := file.Read(buffer)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return status.Errorf(codes.Internal, "failed to read sst file: %v", err)
-		}
-
-		chunk := &pb.SSTChunk{
-			Data:     buffer[:n],
-			Filename: filename,
-			IsLast:   false,
-		}
-
-		if err := stream.Send(chunk); err != nil {
-			return err
-		}
-	}
-
-	// Send final chunk
-	if err := stream.Send(&pb.SSTChunk{
-		Filename: filename,
-		IsLast:   true,
-	}); err != nil {
-		return err
-	}
-
-	return nil
+	return status.Errorf(codes.Unimplemented, "SST export not supported in stub implementation")
 }
 
-// IngestSST implements StorageService.IngestSST
+// IngestSST implements StorageService.IngestSST (stub)
 func (s *Server) IngestSST(stream pb.StorageService_IngestSSTServer) error {
-	var sstPath string
-	var file *os.File
-	var keysIngested int64
-
-	for {
-		chunk, err := stream.Recv()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-
-		if file == nil {
-			sstPath = filepath.Join(s.config.SSTDir, chunk.Filename)
-			file, err = os.Create(sstPath)
-			if err != nil {
-				return status.Errorf(codes.Internal, "failed to create sst file: %v", err)
-			}
-		}
-
-		if len(chunk.Data) > 0 {
-			if _, err := file.Write(chunk.Data); err != nil {
-				file.Close()
-				os.Remove(sstPath)
-				return status.Errorf(codes.Internal, "failed to write sst file: %v", err)
-			}
-		}
-
-		if chunk.IsLast {
-			break
-		}
-	}
-
-	if file != nil {
-		file.Close()
-	}
-
-	if sstPath == "" {
-		return status.Errorf(codes.InvalidArgument, "no sst data received")
-	}
-
-	// Ingest SST file
-	if err := s.db.IngestExternalFile([]string{sstPath}); err != nil {
-		os.Remove(sstPath)
-		return status.Errorf(codes.Internal, "failed to ingest sst: %v", err)
-	}
-
-	// Clean up
-	os.Remove(sstPath)
-
-	s.logger.Info("SST file ingested",
-		zap.String("path", sstPath),
-		zap.Int64("keys", keysIngested),
-	)
-
-	return stream.SendAndClose(&pb.IngestSSTResponse{
-		Success:      true,
-		KeysIngested: keysIngested,
-	})
+	return status.Errorf(codes.Unimplemented, "SST ingest not supported in stub implementation")
 }
 
 // GetPartitionManager returns the partition manager

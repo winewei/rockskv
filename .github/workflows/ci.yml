@@ -1,0 +1,173 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master, 'claude/*' ]
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  GO_VERSION: '1.21'
+
+jobs:
+  # Build and test without CGO (stub implementation)
+  build-nocgo:
+    name: Build without CGO
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Download Go modules
+      run: go mod download
+
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Build without CGO
+      run: |
+        CGO_ENABLED=0 go build -v ./...
+
+    - name: Run tests without CGO
+      run: |
+        CGO_ENABLED=0 go test -v ./...
+
+  # Build and test with CGO and RocksDB
+  build-cgo:
+    name: Build with CGO (RocksDB)
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Install RocksDB dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          libgflags-dev \
+          libsnappy-dev \
+          zlib1g-dev \
+          libbz2-dev \
+          liblz4-dev \
+          libzstd-dev
+
+    - name: Install RocksDB from source
+      run: |
+        git clone --depth 1 --branch v8.1.1 https://github.com/facebook/rocksdb.git /tmp/rocksdb
+        cd /tmp/rocksdb
+        make shared_lib -j$(nproc)
+        sudo make install-shared INSTALL_PATH=/usr/local
+        sudo ldconfig
+
+    - name: Set library path
+      run: |
+        echo "CGO_CFLAGS=-I/usr/local/include" >> $GITHUB_ENV
+        echo "CGO_LDFLAGS=-L/usr/local/lib -lrocksdb -lstdc++ -lm -lz -lsnappy -llz4 -lzstd -lbz2" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=/usr/local/lib" >> $GITHUB_ENV
+
+    - name: Download Go modules
+      run: go mod download
+
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Build with CGO
+      run: |
+        CGO_ENABLED=1 go build -v ./...
+
+    - name: Run tests with CGO
+      run: |
+        CGO_ENABLED=1 go test -v -race -coverprofile=coverage.out ./...
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v4
+      with:
+        files: ./coverage.out
+        fail_ci_if_error: false
+      continue-on-error: true
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v4
+      with:
+        version: latest
+        args: --timeout=5m --build-tags=nocgo
+
+  build-binaries:
+    name: Build Binaries
+    runs-on: ubuntu-22.04
+    needs: [build-nocgo, build-cgo, lint]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Install RocksDB dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          libgflags-dev \
+          libsnappy-dev \
+          zlib1g-dev \
+          libbz2-dev \
+          liblz4-dev \
+          libzstd-dev
+
+    - name: Install RocksDB from source
+      run: |
+        git clone --depth 1 --branch v8.1.1 https://github.com/facebook/rocksdb.git /tmp/rocksdb
+        cd /tmp/rocksdb
+        make shared_lib -j$(nproc)
+        sudo make install-shared INSTALL_PATH=/usr/local
+        sudo ldconfig
+
+    - name: Set library path
+      run: |
+        echo "CGO_CFLAGS=-I/usr/local/include" >> $GITHUB_ENV
+        echo "CGO_LDFLAGS=-L/usr/local/lib -lrocksdb -lstdc++ -lm -lz -lsnappy -llz4 -lzstd -lbz2" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=/usr/local/lib" >> $GITHUB_ENV
+
+    - name: Build all binaries
+      run: make build
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: rockskv-binaries
+        path: bin/
+        retention-days: 7
