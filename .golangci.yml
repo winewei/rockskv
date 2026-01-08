@@ -12,37 +12,29 @@ linters:
     - ineffassign
     - staticcheck
     - unused
-
-linters-settings:
-  errcheck:
-    check-type-assertions: false
-    check-blank: false
-  staticcheck:
-    checks: ["all", "-SA1019"]
-
-issues:
-  exclude-rules:
-    # Ignore error return in defer
-    - linters:
-        - errcheck
-      source: "defer"
-
-    # Ignore protobuf generated files
-    - path: "pkg/proto/"
-      linters:
-        - errcheck
-        - govet
-        - staticcheck
-        - unused
-
-    # Ignore test files for some linters
-    - path: "_test\\.go"
-      linters:
-        - errcheck
-
-  max-issues-per-linter: 50
-  max-same-issues: 10
-
-  exclude-dirs:
-    - vendor
-    - pkg/proto
+  settings:
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+    staticcheck:
+      checks: ["all", "-SA1019"]
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      # Ignore protobuf generated files
+      - path: "pkg/proto/"
+        linters:
+          - errcheck
+          - govet
+          - staticcheck
+          - unused
+      # Ignore test files for some linters
+      - path: "_test\\.go"
+        linters:
+          - errcheck
+    paths:
+      - vendor
+      - pkg/proto
