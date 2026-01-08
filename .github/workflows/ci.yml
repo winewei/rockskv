@@ -71,15 +71,8 @@ jobs:
       id: cache-rocksdb
       uses: actions/cache@v4
       with:
-        path: /usr/local/lib/librocksdb*
-        key: rocksdb-${{ env.ROCKSDB_VERSION }}-ubuntu-22.04-v2
-
-    - name: Cache RocksDB headers
-      id: cache-rocksdb-headers
-      uses: actions/cache@v4
-      with:
-        path: /usr/local/include/rocksdb
-        key: rocksdb-headers-${{ env.ROCKSDB_VERSION }}-ubuntu-22.04-v2
+        path: ${{ github.workspace }}/rocksdb-install
+        key: rocksdb-${{ env.ROCKSDB_VERSION }}-ubuntu-22.04-v3
 
     - name: Install RocksDB from source
       if: steps.cache-rocksdb.outputs.cache-hit != 'true'
@@ -87,18 +80,13 @@ jobs:
         git clone --depth 1 --branch v${{ env.ROCKSDB_VERSION }} https://github.com/facebook/rocksdb.git /tmp/rocksdb
         cd /tmp/rocksdb
         make shared_lib -j$(nproc)
-        sudo make install-shared INSTALL_PATH=/usr/local
-        sudo ldconfig
-
-    - name: Update library cache
-      if: steps.cache-rocksdb.outputs.cache-hit == 'true'
-      run: sudo ldconfig
+        make install-shared INSTALL_PATH=${{ github.workspace }}/rocksdb-install
 
     - name: Set library path
       run: |
-        echo "CGO_CFLAGS=-I/usr/local/include" >> $GITHUB_ENV
-        echo "CGO_LDFLAGS=-L/usr/local/lib -lrocksdb -lstdc++ -lm -lz -lsnappy -llz4 -lzstd -lbz2" >> $GITHUB_ENV
-        echo "LD_LIBRARY_PATH=/usr/local/lib" >> $GITHUB_ENV
+        echo "CGO_CFLAGS=-I${{ github.workspace }}/rocksdb-install/include" >> $GITHUB_ENV
+        echo "CGO_LDFLAGS=-L${{ github.workspace }}/rocksdb-install/lib -lrocksdb -lstdc++ -lm -lz -lsnappy -llz4 -lzstd -lbz2" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=${{ github.workspace }}/rocksdb-install/lib" >> $GITHUB_ENV
 
     - name: Download Go modules
       run: go mod download
@@ -172,15 +160,8 @@ jobs:
       id: cache-rocksdb
       uses: actions/cache@v4
       with:
-        path: /usr/local/lib/librocksdb*
-        key: rocksdb-${{ env.ROCKSDB_VERSION }}-ubuntu-22.04-v2
-
-    - name: Cache RocksDB headers
-      id: cache-rocksdb-headers
-      uses: actions/cache@v4
-      with:
-        path: /usr/local/include/rocksdb
-        key: rocksdb-headers-${{ env.ROCKSDB_VERSION }}-ubuntu-22.04-v2
+        path: ${{ github.workspace }}/rocksdb-install
+        key: rocksdb-${{ env.ROCKSDB_VERSION }}-ubuntu-22.04-v3
 
     - name: Install RocksDB from source
       if: steps.cache-rocksdb.outputs.cache-hit != 'true'
@@ -188,18 +169,13 @@ jobs:
         git clone --depth 1 --branch v${{ env.ROCKSDB_VERSION }} https://github.com/facebook/rocksdb.git /tmp/rocksdb
         cd /tmp/rocksdb
         make shared_lib -j$(nproc)
-        sudo make install-shared INSTALL_PATH=/usr/local
-        sudo ldconfig
-
-    - name: Update library cache
-      if: steps.cache-rocksdb.outputs.cache-hit == 'true'
-      run: sudo ldconfig
+        make install-shared INSTALL_PATH=${{ github.workspace }}/rocksdb-install
 
     - name: Set library path
       run: |
-        echo "CGO_CFLAGS=-I/usr/local/include" >> $GITHUB_ENV
-        echo "CGO_LDFLAGS=-L/usr/local/lib -lrocksdb -lstdc++ -lm -lz -lsnappy -llz4 -lzstd -lbz2" >> $GITHUB_ENV
-        echo "LD_LIBRARY_PATH=/usr/local/lib" >> $GITHUB_ENV
+        echo "CGO_CFLAGS=-I${{ github.workspace }}/rocksdb-install/include" >> $GITHUB_ENV
+        echo "CGO_LDFLAGS=-L${{ github.workspace }}/rocksdb-install/lib -lrocksdb -lstdc++ -lm -lz -lsnappy -llz4 -lzstd -lbz2" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=${{ github.workspace }}/rocksdb-install/lib" >> $GITHUB_ENV
 
     - name: Build all binaries
       run: make build
