@@ -30,7 +30,10 @@ issues:
     # Ignore protobuf generated files
     - path: "pkg/proto/"
       linters:
-        - all
+        - errcheck
+        - govet
+        - staticcheck
+        - unused
 
     # Ignore test files for some linters
     - path: "_test\\.go"
