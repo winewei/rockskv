@@ -37,7 +37,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to connect: %v\n", err)
 		os.Exit(1)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	ctx := context.Background()
 
@@ -205,7 +205,10 @@ func runBenchmark(c *client.Client, args []string) {
 	keySize := fs.Int("keysize", 16, "Key size in bytes")
 	valueSize := fs.Int("valuesize", 64, "Value size in bytes")
 	parallel := fs.Int("p", 10, "Number of parallel clients")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to parse benchmark flags: %v\n", err)
+		return
+	}
 
 	fmt.Printf("Running benchmark: %d operations, %d parallel\n", *n, *parallel)
 	fmt.Printf("Key size: %d bytes, Value size: %d bytes\n", *keySize, *valueSize)
@@ -249,6 +252,6 @@ func runBenchmark(c *client.Client, args []string) {
 	// Cleanup
 	for i := 0; i < *n; i++ {
 		k := append(key, []byte(fmt.Sprintf("%d", i))...)
-		c.Delete(ctx, k)
+		_ = c.Delete(ctx, k)
 	}
 }

@@ -3,7 +3,6 @@ package compute
 import (
 	"context"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -46,7 +45,6 @@ type Router struct {
 	nodeID       string
 
 	routeTable atomic.Value // *RouteTable
-	mu         sync.RWMutex
 	logger     *zap.Logger
 
 	ctx    context.Context
@@ -104,7 +102,7 @@ func (r *Router) Start() error {
 func (r *Router) Stop() {
 	r.cancel()
 	if r.metadataConn != nil {
-		r.metadataConn.Close()
+		_ = r.metadataConn.Close()
 	}
 	r.logger.Info("Router stopped")
 }

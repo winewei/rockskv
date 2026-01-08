@@ -34,7 +34,6 @@ type Partition struct {
 	ID      uint32
 	Status  pb.PartitionStatus
 	IsPrime bool // true if this node is the primary for this partition
-	mu      sync.RWMutex
 }
 
 // NewPartitionManager creates a new partition manager

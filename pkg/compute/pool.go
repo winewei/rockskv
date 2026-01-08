@@ -159,7 +159,7 @@ func (p *ConnectionPool) RemoveConn(addr string) {
 	defer p.mu.Unlock()
 
 	if conn, ok := p.conns[addr]; ok {
-		conn.Close()
+		_ = conn.Close()
 		delete(p.conns, addr)
 		common.ConnectionPoolSize.WithLabelValues(addr).Set(0)
 		p.logger.Debug("Removed connection from pool",

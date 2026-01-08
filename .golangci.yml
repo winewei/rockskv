@@ -1,26 +1,22 @@
+version: "2"
+
 run:
   timeout: 5m
-  go: '1.21'
+  go: "1.21"
 
 linters:
+  default: none
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
     - unused
-  disable:
-    - deadcode
-    - structcheck
-    - varcheck
 
 linters-settings:
   errcheck:
     check-type-assertions: false
     check-blank: false
-  govet:
-    check-shadowing: false
   staticcheck:
     checks: ["all", "-SA1019"]
 
@@ -40,15 +36,10 @@ issues:
     - path: "_test\\.go"
       linters:
         - errcheck
-        - gosec
 
-  # Maximum issues count per one linter
   max-issues-per-linter: 50
-
-  # Maximum count of issues with the same text
   max-same-issues: 10
 
-  # Don't report issues in auto-generated files
   exclude-dirs:
     - vendor
     - pkg/proto

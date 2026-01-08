@@ -105,7 +105,7 @@ func (s *Server) Stop() {
 		s.grpcServer.GracefulStop()
 	}
 	if s.store != nil {
-		s.store.Close()
+		_ = s.store.Close()
 	}
 	s.logger.Info("Metadata server stopped")
 }
