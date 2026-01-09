@@ -9,7 +9,7 @@ type RocksDBConfig struct {
 	DataDir                  string `mapstructure:"data_dir"`
 	WALDir                   string `mapstructure:"wal_dir"`
 	BlockCacheSize           int64  `mapstructure:"block_cache_size"`
-	WriteBufferSize          int    `mapstructure:"write_buffer_size"`
+	WriteBufferSize          uint64 `mapstructure:"write_buffer_size"`
 	MaxWriteBufferNumber     int    `mapstructure:"max_write_buffer_number"`
 	MaxBackgroundCompactions int    `mapstructure:"max_background_compactions"`
 	MaxBackgroundFlushes     int    `mapstructure:"max_background_flushes"`
