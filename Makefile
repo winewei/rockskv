@@ -101,6 +101,10 @@ build-darwin-amd64:
 	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/darwin-amd64/rockskv-compute ./cmd/compute
 	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/darwin-amd64/rockskv-metadata ./cmd/metadata
 	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/darwin-amd64/rockskv-cli ./cmd/cli
+	@if command -v codesign >/dev/null 2>&1; then \
+		echo "Signing darwin/amd64 binaries..."; \
+		codesign -s - $(BINDIR)/darwin-amd64/rockskv-*; \
+	fi
 
 build-darwin-arm64:
 	@echo "Building for darwin/arm64 (Apple Silicon)..."
@@ -109,6 +113,10 @@ build-darwin-arm64:
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/darwin-arm64/rockskv-compute ./cmd/compute
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/darwin-arm64/rockskv-metadata ./cmd/metadata
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/darwin-arm64/rockskv-cli ./cmd/cli
+	@if command -v codesign >/dev/null 2>&1; then \
+		echo "Signing darwin/arm64 binaries..."; \
+		codesign -s - $(BINDIR)/darwin-arm64/rockskv-*; \
+	fi
 
 # 运行测试
 test:

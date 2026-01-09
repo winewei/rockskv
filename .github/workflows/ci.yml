@@ -131,8 +131,8 @@ jobs:
         version: v2.0.2
         args: --timeout=5m --build-tags=nocgo
 
-  build-binaries:
-    name: Build Multi-Arch Binaries
+  build-linux-binaries:
+    name: Build Linux Binaries
     runs-on: ubuntu-latest
     needs: [build-nocgo, build-cgo, lint]
 
@@ -148,16 +148,16 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
         cache: true
 
-    - name: Build all platform binaries
-      run: make build-all
+    - name: Build Linux binaries
+      run: |
+        make build-linux-amd64
+        make build-linux-arm64
 
     - name: Create archives
       run: |
         cd bin
-        for dir in */; do
-          platform=${dir%/}
-          tar -czvf rockskv-${platform}.tar.gz -C ${platform} .
-        done
+        tar -czvf rockskv-linux-amd64.tar.gz -C linux-amd64 .
+        tar -czvf rockskv-linux-arm64.tar.gz -C linux-arm64 .
 
     - name: Upload Linux AMD64
       uses: actions/upload-artifact@v4
@@ -172,6 +172,34 @@ jobs:
         name: rockskv-linux-arm64
         path: bin/rockskv-linux-arm64.tar.gz
         retention-days: 30
+
+  build-darwin-binaries:
+    name: Build Darwin Binaries (Signed)
+    runs-on: macos-latest
+    needs: [build-nocgo, build-cgo, lint]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Build and sign Darwin binaries
+      run: |
+        make build-darwin-amd64
+        make build-darwin-arm64
+
+    - name: Create archives
+      run: |
+        cd bin
+        tar -czvf rockskv-darwin-amd64.tar.gz -C darwin-amd64 .
+        tar -czvf rockskv-darwin-arm64.tar.gz -C darwin-arm64 .
 
     - name: Upload Darwin AMD64
       uses: actions/upload-artifact@v4
