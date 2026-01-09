@@ -80,7 +80,11 @@ jobs:
         git clone --depth 1 --branch v${{ env.ROCKSDB_VERSION }} https://github.com/facebook/rocksdb.git /tmp/rocksdb
         cd /tmp/rocksdb
         make shared_lib -j$(nproc)
-        make install-shared INSTALL_PATH=${{ github.workspace }}/rocksdb-install
+        # Manual install to avoid permission issues
+        mkdir -p ${{ github.workspace }}/rocksdb-install/lib
+        mkdir -p ${{ github.workspace }}/rocksdb-install/include
+        cp -r include/rocksdb ${{ github.workspace }}/rocksdb-install/include/
+        cp librocksdb.so* ${{ github.workspace }}/rocksdb-install/lib/
 
     - name: Set library path
       run: |
@@ -169,7 +173,11 @@ jobs:
         git clone --depth 1 --branch v${{ env.ROCKSDB_VERSION }} https://github.com/facebook/rocksdb.git /tmp/rocksdb
         cd /tmp/rocksdb
         make shared_lib -j$(nproc)
-        make install-shared INSTALL_PATH=${{ github.workspace }}/rocksdb-install
+        # Manual install to avoid permission issues
+        mkdir -p ${{ github.workspace }}/rocksdb-install/lib
+        mkdir -p ${{ github.workspace }}/rocksdb-install/include
+        cp -r include/rocksdb ${{ github.workspace }}/rocksdb-install/include/
+        cp librocksdb.so* ${{ github.workspace }}/rocksdb-install/lib/
 
     - name: Set library path
       run: |
