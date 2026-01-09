@@ -166,8 +166,8 @@ func (r *Router) InitializePartitions(ctx context.Context) error {
 
 		table.Partitions[i] = &PartitionInfo{
 			ID:      i,
-			Primary: nodes[primaryIdx].ID,
-			Replica: nodes[replicaIdx].ID,
+			Primary: nodes[primaryIdx].Addr,
+			Replica: nodes[replicaIdx].Addr,
 			Status:  PartitionStatusNormal,
 		}
 	}
@@ -209,10 +209,10 @@ func (r *Router) RebalancePartitions(ctx context.Context) error {
 	currentTable := r.routeTable
 	r.mu.Unlock()
 
-	// Create node ID set for quick lookup
-	nodeSet := make(map[string]bool)
+	// Create node address set for quick lookup
+	addrSet := make(map[string]bool)
 	for _, node := range nodes {
-		nodeSet[node.ID] = true
+		addrSet[node.Addr] = true
 	}
 
 	newTable := &RouteTable{
@@ -231,24 +231,24 @@ func (r *Router) RebalancePartitions(ctx context.Context) error {
 		}
 
 		// Check if primary is still available
-		if nodeSet[partition.Primary] {
+		if addrSet[partition.Primary] {
 			newPartition.Primary = partition.Primary
 		} else {
 			// Assign new primary
-			newPartition.Primary = nodes[int(partitionID)%nodeCount].ID
+			newPartition.Primary = nodes[int(partitionID)%nodeCount].Addr
 			changes++
 		}
 
 		// Check if replica is still available and different from primary
-		if nodeSet[partition.Replica] && partition.Replica != newPartition.Primary {
+		if addrSet[partition.Replica] && partition.Replica != newPartition.Primary {
 			newPartition.Replica = partition.Replica
 		} else {
 			// Assign new replica
 			replicaIdx := (int(partitionID) + 1) % nodeCount
-			if nodes[replicaIdx].ID == newPartition.Primary {
+			if nodes[replicaIdx].Addr == newPartition.Primary {
 				replicaIdx = (replicaIdx + 1) % nodeCount
 			}
-			newPartition.Replica = nodes[replicaIdx].ID
+			newPartition.Replica = nodes[replicaIdx].Addr
 			changes++
 		}
 

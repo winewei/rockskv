@@ -45,7 +45,10 @@ func main() {
 	// Start metrics server
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
-		metricsAddr := ":9091"
+		metricsAddr := viper.GetString("metrics_addr")
+		if metricsAddr == "" {
+			metricsAddr = ":9091"
+		}
 		logger.Info("Starting metrics server", zap.String("addr", metricsAddr))
 		if err := http.ListenAndServe(metricsAddr, nil); err != nil {
 			logger.Error("Metrics server failed", zap.Error(err))

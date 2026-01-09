@@ -2,6 +2,7 @@
 node_id: "storage-2"
 listen_addr: ":9002"
 metadata_addr: "localhost:9000"
+metrics_addr: ":9092"
 sst_dir: "./data/sst2"
 
 # RocksDB Configuration
