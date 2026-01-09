@@ -1,0 +1,9 @@
+# Metadata Service Configuration - Local Development
+node_id: "metadata-1"
+listen_addr: ":9000"
+
+# etcd Configuration
+etcd:
+  endpoints:
+    - "localhost:2379"
+  dial_timeout: "5s"

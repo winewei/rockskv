@@ -32,3 +32,10 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Runtime data
+data/
+.pids/
+
+# Docker volumes
+docker-data/

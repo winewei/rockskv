@@ -1,0 +1,37 @@
+# Storage Node Configuration - Local Development
+node_id: "storage-1"
+listen_addr: ":9001"
+metadata_addr: "localhost:9000"
+sst_dir: "./data/sst"
+
+# RocksDB Configuration
+rocksdb:
+  # Data directory
+  data_dir: "./data/storage"
+
+  # WAL directory
+  wal_dir: "./data/storage/wal"
+
+  # Block cache size (256MB for local dev)
+  block_cache_size: 268435456
+
+  # Write buffer size (32MB)
+  write_buffer_size: 33554432
+
+  # Maximum number of write buffers
+  max_write_buffer_number: 2
+
+  # Background compaction threads
+  max_background_compactions: 2
+
+  # Background flush threads
+  max_background_flushes: 1
+
+  # Target file size for L1
+  target_file_size_base: 33554432
+
+  # Maximum bytes for L1
+  max_bytes_for_level_base: 134217728
+
+  # Compression type
+  compression_type: "lz4"

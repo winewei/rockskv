@@ -1,0 +1,37 @@
+# Dockerfile for RocksKV Storage Service
+FROM golang:1.21-alpine AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache git
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the binary (using stub implementation without CGO)
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /rockskv-storage ./cmd/storage
+
+# Final stage
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY --from=builder /rockskv-storage /usr/local/bin/rockskv-storage
+
+# Create non-root user and data directory
+RUN adduser -D -g '' rockskv && \
+    mkdir -p /data/wal /data/sst && \
+    chown -R rockskv:rockskv /data
+
+USER rockskv
+
+VOLUME ["/data"]
+EXPOSE 9001
+
+ENTRYPOINT ["rockskv-storage"]
+CMD ["-c", "/etc/rockskv/storage.yaml"]

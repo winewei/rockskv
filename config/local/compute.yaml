@@ -1,0 +1,12 @@
+# Compute Node Configuration - Local Development
+node_id: "compute-1"
+listen_addr: ":8000"
+metadata_addr: "localhost:9000"
+
+# Connection Pool Configuration
+pool:
+  max_conns_per_host: 5
+  idle_timeout: "5m"
+  dial_timeout: "5s"
+  keep_alive_time: "10s"
+  keep_alive_timeout: "5s"

@@ -1,0 +1,33 @@
+# Dockerfile for RocksKV Metadata Service
+FROM golang:1.21-alpine AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache git
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the binary
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /rockskv-metadata ./cmd/metadata
+
+# Final stage
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY --from=builder /rockskv-metadata /usr/local/bin/rockskv-metadata
+
+# Create non-root user
+RUN adduser -D -g '' rockskv
+USER rockskv
+
+EXPOSE 9000
+
+ENTRYPOINT ["rockskv-metadata"]
+CMD ["-c", "/etc/rockskv/metadata.yaml"]
