@@ -56,6 +56,7 @@ fi
 # Check RocksKV services
 check_service "metadata" 9000
 check_service "storage" 9001
+check_service "storage-2" 9002
 check_service "compute" 8000
 
 echo ""

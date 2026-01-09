@@ -54,6 +54,7 @@ stop_service() {
 
 # Stop in reverse order
 stop_service "compute"
+stop_service "storage-2"
 stop_service "storage"
 stop_service "metadata"
 

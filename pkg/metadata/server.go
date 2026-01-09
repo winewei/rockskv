@@ -191,7 +191,30 @@ func (s *Server) RegisterNode(ctx context.Context, req *pb.RegisterNodeRequest) 
 		zap.String("role", string(role)),
 	)
 
+	// Auto-initialize partitions when enough storage nodes are registered
+	if role == NodeRoleStorage {
+		s.tryInitializePartitions(ctx)
+	}
+
 	return &pb.RegisterNodeResponse{Success: true}, nil
+}
+
+// tryInitializePartitions attempts to initialize partitions if not already done
+func (s *Server) tryInitializePartitions(ctx context.Context) {
+	table := s.router.GetRouteTable()
+	if len(table.Partitions) > 0 {
+		// Already initialized
+		return
+	}
+
+	if err := s.router.InitializePartitions(ctx); err != nil {
+		s.logger.Debug("Cannot initialize partitions yet",
+			zap.Error(err),
+		)
+		return
+	}
+
+	s.logger.Info("Partitions auto-initialized")
 }
 
 // Heartbeat implements MetadataService.Heartbeat

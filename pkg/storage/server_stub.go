@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
 	"github.com/example/rockskv/pkg/common"
@@ -47,6 +48,8 @@ type Server struct {
 	db               *RocksDB
 	partitionManager *PartitionManager
 	grpcServer       *grpc.Server
+	metadataConn     *grpc.ClientConn
+	metadataClient   pb.MetadataServiceClient
 	logger           *zap.Logger
 }
 
@@ -100,7 +103,94 @@ func (s *Server) Start() error {
 		zap.String("node_id", s.config.NodeID),
 	)
 
+	// Register with metadata service in background
+	go s.registerWithMetadata()
+
 	return s.grpcServer.Serve(listener)
+}
+
+// registerWithMetadata connects to metadata service and registers this storage node
+func (s *Server) registerWithMetadata() {
+	// Wait a bit for gRPC server to start
+	time.Sleep(time.Second)
+
+	for {
+		if err := s.doRegister(); err != nil {
+			s.logger.Warn("Failed to register with metadata, retrying...",
+				zap.Error(err),
+			)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		break
+	}
+
+	// Start heartbeat loop
+	s.heartbeatLoop()
+}
+
+func (s *Server) doRegister() error {
+	// Connect to metadata service
+	conn, err := grpc.Dial(
+		s.config.MetadataAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to connect to metadata: %w", err)
+	}
+	s.metadataConn = conn
+	s.metadataClient = pb.NewMetadataServiceClient(conn)
+
+	// Get public address (use listen addr for now)
+	addr := s.config.ListenAddr
+	if addr[0] == ':' {
+		// If only port specified, use localhost
+		addr = "localhost" + addr
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := s.metadataClient.RegisterNode(ctx, &pb.RegisterNodeRequest{
+		NodeId: s.config.NodeID,
+		Addr:   addr,
+		Role:   pb.NodeRole_STORAGE,
+	})
+	if err != nil {
+		return fmt.Errorf("register failed: %w", err)
+	}
+
+	if !resp.Success {
+		return fmt.Errorf("register returned failure")
+	}
+
+	s.logger.Info("Registered with metadata service",
+		zap.String("metadata_addr", s.config.MetadataAddr),
+		zap.String("node_id", s.config.NodeID),
+	)
+
+	return nil
+}
+
+func (s *Server) heartbeatLoop() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if s.metadataClient == nil {
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, err := s.metadataClient.Heartbeat(ctx, &pb.HeartbeatRequest{
+			NodeId: s.config.NodeID,
+		})
+		cancel()
+
+		if err != nil {
+			s.logger.Warn("Heartbeat failed", zap.Error(err))
+		}
+	}
 }
 
 // Stop gracefully stops the server

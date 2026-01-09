@@ -90,6 +90,9 @@ start_service "metadata" "$SCRIPT_DIR/start-metadata.sh"
 sleep 2
 
 start_service "storage" "$SCRIPT_DIR/start-storage.sh"
+sleep 1
+
+start_service "storage-2" "$SCRIPT_DIR/start-storage-2.sh"
 sleep 2
 
 start_service "compute" "$SCRIPT_DIR/start-compute.sh"
@@ -101,10 +104,11 @@ echo -e "${GREEN}  All services started!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "Services:"
-echo "  - etcd:     http://localhost:2379"
-echo "  - metadata: localhost:9000"
-echo "  - storage:  localhost:9001"
-echo "  - compute:  localhost:8000 (client endpoint)"
+echo "  - etcd:      http://localhost:2379"
+echo "  - metadata:  localhost:9000"
+echo "  - storage-1: localhost:9001"
+echo "  - storage-2: localhost:9002"
+echo "  - compute:   localhost:8000 (client endpoint)"
 echo ""
 echo "Test with CLI:"
 echo "  ./bin/darwin-arm64/rockskv-cli put foo bar"
@@ -113,6 +117,7 @@ echo ""
 echo "View logs:"
 echo "  tail -f logs/metadata.log"
 echo "  tail -f logs/storage.log"
+echo "  tail -f logs/storage-2.log"
 echo "  tail -f logs/compute.log"
 echo ""
 echo "Stop all services:"
