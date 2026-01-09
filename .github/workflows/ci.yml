@@ -8,7 +8,6 @@ on:
 
 env:
   GO_VERSION: '1.21'
-  ROCKSDB_VERSION: '9.11.2'
 
 jobs:
   # Build and test without CGO (stub implementation)
@@ -43,7 +42,7 @@ jobs:
   # Build and test with CGO and RocksDB
   build-cgo:
     name: Build with CGO (RocksDB)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
     - name: Checkout code
@@ -55,42 +54,10 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
         cache: true
 
-    - name: Install RocksDB dependencies
+    - name: Install RocksDB from apt
       run: |
         sudo apt-get update
-        sudo apt-get install -y \
-          build-essential \
-          libgflags-dev \
-          libsnappy-dev \
-          zlib1g-dev \
-          libbz2-dev \
-          liblz4-dev \
-          libzstd-dev
-
-    - name: Cache RocksDB
-      id: cache-rocksdb
-      uses: actions/cache@v4
-      with:
-        path: ${{ github.workspace }}/rocksdb-install
-        key: rocksdb-${{ env.ROCKSDB_VERSION }}-ubuntu-22.04-v3
-
-    - name: Install RocksDB from source
-      if: steps.cache-rocksdb.outputs.cache-hit != 'true'
-      run: |
-        git clone --depth 1 --branch v${{ env.ROCKSDB_VERSION }} https://github.com/facebook/rocksdb.git /tmp/rocksdb
-        cd /tmp/rocksdb
-        make shared_lib -j$(nproc)
-        # Manual install to avoid permission issues
-        mkdir -p ${{ github.workspace }}/rocksdb-install/lib
-        mkdir -p ${{ github.workspace }}/rocksdb-install/include
-        cp -r include/rocksdb ${{ github.workspace }}/rocksdb-install/include/
-        cp librocksdb.so* ${{ github.workspace }}/rocksdb-install/lib/
-
-    - name: Set library path
-      run: |
-        echo "CGO_CFLAGS=-I${{ github.workspace }}/rocksdb-install/include" >> $GITHUB_ENV
-        echo "CGO_LDFLAGS=-L${{ github.workspace }}/rocksdb-install/lib -lrocksdb -lstdc++ -lm -lz -lsnappy -llz4 -lzstd -lbz2" >> $GITHUB_ENV
-        echo "LD_LIBRARY_PATH=${{ github.workspace }}/rocksdb-install/lib" >> $GITHUB_ENV
+        sudo apt-get install -y librocksdb-dev
 
     - name: Download Go modules
       run: go mod download
@@ -135,7 +102,7 @@ jobs:
 
   build-binaries:
     name: Build Binaries
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs: [build-nocgo, build-cgo, lint]
 
     steps:
@@ -148,42 +115,10 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
         cache: true
 
-    - name: Install RocksDB dependencies
+    - name: Install RocksDB from apt
       run: |
         sudo apt-get update
-        sudo apt-get install -y \
-          build-essential \
-          libgflags-dev \
-          libsnappy-dev \
-          zlib1g-dev \
-          libbz2-dev \
-          liblz4-dev \
-          libzstd-dev
-
-    - name: Cache RocksDB
-      id: cache-rocksdb
-      uses: actions/cache@v4
-      with:
-        path: ${{ github.workspace }}/rocksdb-install
-        key: rocksdb-${{ env.ROCKSDB_VERSION }}-ubuntu-22.04-v3
-
-    - name: Install RocksDB from source
-      if: steps.cache-rocksdb.outputs.cache-hit != 'true'
-      run: |
-        git clone --depth 1 --branch v${{ env.ROCKSDB_VERSION }} https://github.com/facebook/rocksdb.git /tmp/rocksdb
-        cd /tmp/rocksdb
-        make shared_lib -j$(nproc)
-        # Manual install to avoid permission issues
-        mkdir -p ${{ github.workspace }}/rocksdb-install/lib
-        mkdir -p ${{ github.workspace }}/rocksdb-install/include
-        cp -r include/rocksdb ${{ github.workspace }}/rocksdb-install/include/
-        cp librocksdb.so* ${{ github.workspace }}/rocksdb-install/lib/
-
-    - name: Set library path
-      run: |
-        echo "CGO_CFLAGS=-I${{ github.workspace }}/rocksdb-install/include" >> $GITHUB_ENV
-        echo "CGO_LDFLAGS=-L${{ github.workspace }}/rocksdb-install/lib -lrocksdb -lstdc++ -lm -lz -lsnappy -llz4 -lzstd -lbz2" >> $GITHUB_ENV
-        echo "LD_LIBRARY_PATH=${{ github.workspace }}/rocksdb-install/lib" >> $GITHUB_ENV
+        sudo apt-get install -y librocksdb-dev
 
     - name: Build all binaries
       run: make build
