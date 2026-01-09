@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	github.com/cespare/xxhash/v2 v2.2.0
-	github.com/linxGnu/grocksdb v1.9.7
+	github.com/linxGnu/grocksdb v1.10.4
 	github.com/prometheus/client_golang v1.18.0
 	github.com/spf13/viper v1.18.2
 	go.etcd.io/etcd/client/v3 v3.5.11
