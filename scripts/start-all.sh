@@ -46,44 +46,6 @@ start_service() {
     fi
 }
 
-# Check if etcd is running
-if ! pgrep -x "etcd" > /dev/null; then
-    echo -e "${YELLOW}[INFO]${NC} etcd is not running."
-    echo "Please start etcd first in a separate terminal:"
-    echo ""
-    echo "  ./scripts/start-etcd.sh"
-    echo ""
-    echo "Or if you want to run etcd in background:"
-    echo ""
-    echo "  nohup ./scripts/start-etcd.sh > logs/etcd.log 2>&1 &"
-    echo ""
-    read -p "Press Enter after starting etcd, or Ctrl+C to cancel..."
-fi
-
-# Wait for etcd to be ready
-echo -e "${GREEN}[CHECK]${NC} Checking etcd connectivity..."
-for i in {1..10}; do
-    if command -v etcdctl &> /dev/null; then
-        if etcdctl endpoint health --endpoints=localhost:2379 2>/dev/null | grep -q "is healthy"; then
-            echo -e "${GREEN}[OK]${NC} etcd is ready"
-            break
-        fi
-    else
-        # If etcdctl is not available, try a simple connection test
-        if curl -s http://localhost:2379/health 2>/dev/null | grep -q "true"; then
-            echo -e "${GREEN}[OK]${NC} etcd is ready"
-            break
-        fi
-    fi
-
-    if [ $i -eq 10 ]; then
-        echo -e "${RED}[FAIL]${NC} Could not connect to etcd at localhost:2379"
-        exit 1
-    fi
-    echo -e "${YELLOW}[WAIT]${NC} Waiting for etcd... ($i/10)"
-    sleep 1
-done
-
 # Start services in order
 echo ""
 start_service "metadata" "$SCRIPT_DIR/start-metadata.sh"
@@ -104,7 +66,6 @@ echo -e "${GREEN}  All services started!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "Services:"
-echo "  - etcd:      http://localhost:2379"
 echo "  - metadata:  localhost:9000"
 echo "  - storage-1: localhost:9001"
 echo "  - storage-2: localhost:9002"
