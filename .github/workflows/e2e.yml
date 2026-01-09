@@ -1,0 +1,164 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main, master, 'claude/*' ]
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  GO_VERSION: '1.21'
+
+jobs:
+  e2e-test:
+    name: E2E Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      etcd:
+        image: bitnami/etcd:3.5
+        ports:
+          - 2379:2379
+          - 2380:2380
+        env:
+          ALLOW_NONE_AUTHENTICATION: yes
+          ETCD_ADVERTISE_CLIENT_URLS: http://localhost:2379
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Download Go modules
+      run: go mod download
+
+    - name: Build binaries
+      run: |
+        CGO_ENABLED=0 make build-linux-amd64
+
+    - name: Create data directories
+      run: |
+        mkdir -p data/storage1/wal data/storage2/wal data/sst1 data/sst2 logs .pids
+
+    - name: Wait for etcd
+      run: |
+        echo "Waiting for etcd..."
+        for i in {1..30}; do
+          if nc -z localhost 2379; then
+            echo "etcd is ready"
+            break
+          fi
+          echo "Waiting... ($i)"
+          sleep 1
+        done
+
+    - name: Start Metadata Service
+      run: |
+        ./bin/linux-amd64/rockskv-metadata -c config/local/metadata.yaml > logs/metadata.log 2>&1 &
+        echo $! > .pids/metadata.pid
+        echo "Started metadata service (PID: $(cat .pids/metadata.pid))"
+
+    - name: Wait for Metadata Service
+      run: |
+        echo "Waiting for metadata service..."
+        for i in {1..30}; do
+          if nc -z localhost 9000; then
+            echo "Metadata service is ready"
+            break
+          fi
+          echo "Waiting... ($i)"
+          sleep 1
+        done
+
+    - name: Start Storage Service 1
+      run: |
+        ./bin/linux-amd64/rockskv-storage -c config/local/storage.yaml > logs/storage-1.log 2>&1 &
+        echo $! > .pids/storage.pid
+        echo "Started storage-1 service (PID: $(cat .pids/storage.pid))"
+
+    - name: Start Storage Service 2
+      run: |
+        ./bin/linux-amd64/rockskv-storage -c config/local/storage-2.yaml > logs/storage-2.log 2>&1 &
+        echo $! > .pids/storage-2.pid
+        echo "Started storage-2 service (PID: $(cat .pids/storage-2.pid))"
+
+    - name: Wait for Storage Services
+      run: |
+        echo "Waiting for storage services..."
+        for i in {1..30}; do
+          if nc -z localhost 9001 && nc -z localhost 9002; then
+            echo "Storage services are ready"
+            break
+          fi
+          echo "Waiting... ($i)"
+          sleep 1
+        done
+        # Give extra time for registration
+        sleep 3
+
+    - name: Start Compute Service
+      run: |
+        ./bin/linux-amd64/rockskv-compute -c config/local/compute.yaml > logs/compute.log 2>&1 &
+        echo $! > .pids/compute.pid
+        echo "Started compute service (PID: $(cat .pids/compute.pid))"
+
+    - name: Wait for Compute Service
+      run: |
+        echo "Waiting for compute service..."
+        for i in {1..30}; do
+          if nc -z localhost 8000; then
+            echo "Compute service is ready"
+            break
+          fi
+          echo "Waiting... ($i)"
+          sleep 1
+        done
+        # Give extra time for route table sync
+        sleep 2
+
+    - name: Run Smoke Tests
+      run: |
+        chmod +x ./scripts/smoke-test.sh
+        ./scripts/smoke-test.sh
+
+    - name: Stop Services
+      if: always()
+      run: |
+        echo "Stopping services..."
+        for pid_file in .pids/*.pid; do
+          if [ -f "$pid_file" ]; then
+            pid=$(cat "$pid_file")
+            if kill -0 "$pid" 2>/dev/null; then
+              echo "Stopping $(basename $pid_file .pid) (PID: $pid)"
+              kill "$pid" 2>/dev/null || true
+            fi
+          fi
+        done
+
+    - name: Upload logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: e2e-logs
+        path: logs/
+        retention-days: 7
+
+    - name: Show logs on failure
+      if: failure()
+      run: |
+        echo "=== Metadata Log ==="
+        cat logs/metadata.log || true
+        echo ""
+        echo "=== Storage-1 Log ==="
+        cat logs/storage-1.log || true
+        echo ""
+        echo "=== Storage-2 Log ==="
+        cat logs/storage-2.log || true
+        echo ""
+        echo "=== Compute Log ==="
+        cat logs/compute.log || true
