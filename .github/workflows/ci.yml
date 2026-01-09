@@ -132,13 +132,15 @@ jobs:
         args: --timeout=5m --build-tags=nocgo
 
   build-binaries:
-    name: Build Binaries
-    runs-on: ubuntu-24.04
+    name: Build Multi-Arch Binaries
+    runs-on: ubuntu-latest
     needs: [build-nocgo, build-cgo, lint]
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -146,45 +148,41 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
         cache: true
 
-    - name: Install build dependencies
+    - name: Build all platform binaries
+      run: make build-all
+
+    - name: Create archives
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          build-essential \
-          libgflags-dev \
-          libsnappy-dev \
-          zlib1g-dev \
-          libbz2-dev \
-          liblz4-dev \
-          libzstd-dev
+        cd bin
+        for dir in */; do
+          platform=${dir%/}
+          tar -czvf rockskv-${platform}.tar.gz -C ${platform} .
+        done
 
-    - name: Cache RocksDB
-      id: cache-rocksdb
-      uses: actions/cache@v4
-      with:
-        path: ~/rocksdb-${{ env.ROCKSDB_VERSION }}
-        key: rocksdb-${{ env.ROCKSDB_VERSION }}-ubuntu-24.04-v1
-
-    - name: Build RocksDB from source
-      if: steps.cache-rocksdb.outputs.cache-hit != 'true'
-      run: |
-        cd ~
-        git clone --depth 1 --branch v${{ env.ROCKSDB_VERSION }} https://github.com/facebook/rocksdb.git rocksdb-${{ env.ROCKSDB_VERSION }}
-        cd rocksdb-${{ env.ROCKSDB_VERSION }}
-        make shared_lib -j$(nproc)
-
-    - name: Install RocksDB
-      run: |
-        cd ~/rocksdb-${{ env.ROCKSDB_VERSION }}
-        sudo make install-shared INSTALL_PATH=/usr/local
-        sudo ldconfig
-
-    - name: Build all binaries
-      run: make build
-
-    - name: Upload artifacts
+    - name: Upload Linux AMD64
       uses: actions/upload-artifact@v4
       with:
-        name: rockskv-binaries
-        path: bin/
-        retention-days: 7
+        name: rockskv-linux-amd64
+        path: bin/rockskv-linux-amd64.tar.gz
+        retention-days: 30
+
+    - name: Upload Linux ARM64
+      uses: actions/upload-artifact@v4
+      with:
+        name: rockskv-linux-arm64
+        path: bin/rockskv-linux-arm64.tar.gz
+        retention-days: 30
+
+    - name: Upload Darwin AMD64
+      uses: actions/upload-artifact@v4
+      with:
+        name: rockskv-darwin-amd64
+        path: bin/rockskv-darwin-amd64.tar.gz
+        retention-days: 30
+
+    - name: Upload Darwin ARM64 (Apple Silicon)
+      uses: actions/upload-artifact@v4
+      with:
+        name: rockskv-darwin-arm64
+        path: bin/rockskv-darwin-arm64.tar.gz
+        retention-days: 30
