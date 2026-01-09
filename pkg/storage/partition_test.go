@@ -1,8 +1,14 @@
 package storage
 
 import (
+	"bytes"
 	"testing"
 )
+
+// testCompareBytes is a helper for tests (avoiding conflict with server_stub.go)
+func testCompareBytes(a, b []byte) int {
+	return bytes.Compare(a, b)
+}
 
 func TestCalculatePartition(t *testing.T) {
 	tests := []struct {
@@ -13,6 +19,8 @@ func TestCalculatePartition(t *testing.T) {
 		{"simple key", []byte("hello")},
 		{"numeric key", []byte("12345")},
 		{"long key", []byte("this-is-a-very-long-key-that-should-still-work-correctly")},
+		{"binary key", []byte{0x00, 0x01, 0x02, 0xff}},
+		{"unicode key", []byte("你好世界")},
 	}
 
 	for _, tt := range tests {
@@ -41,6 +49,7 @@ func TestMakePartitionKey(t *testing.T) {
 		{"partition 1000", 1000, []byte("test")},
 		{"max partition", TotalPartitions - 1, []byte("test")},
 		{"empty key", 100, []byte{}},
+		{"binary key", 500, []byte{0x00, 0x01, 0x02}},
 	}
 
 	for _, tt := range tests {
@@ -64,6 +73,26 @@ func TestMakePartitionKey(t *testing.T) {
 	}
 }
 
+func TestParsePartitionKeyError(t *testing.T) {
+	tests := []struct {
+		name       string
+		storageKey []byte
+	}{
+		{"empty key", []byte{}},
+		{"too short", []byte("p:1")},
+		{"very short", []byte("p")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := ParsePartitionKey(tt.storageKey)
+			if err == nil {
+				t.Error("expected error for invalid storage key")
+			}
+		})
+	}
+}
+
 func TestGetPartitionRange(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -80,16 +109,37 @@ func TestGetPartitionRange(t *testing.T) {
 			start, end := GetPartitionRange(tt.partitionID)
 
 			// Verify start < end
-			if compareBytes(start, end) >= 0 {
+			if testCompareBytes(start, end) >= 0 {
 				t.Errorf("start >= end for partition %d", tt.partitionID)
 			}
 
 			// Verify a key in the partition falls within range
 			testKey := MakePartitionKey(tt.partitionID, []byte("test"))
-			if compareBytes(testKey, start) < 0 || compareBytes(testKey, end) >= 0 {
+			if testCompareBytes(testKey, start) < 0 || testCompareBytes(testKey, end) >= 0 {
 				t.Errorf("test key outside range for partition %d", tt.partitionID)
 			}
 		})
+	}
+}
+
+func TestPartitionRangeNonOverlap(t *testing.T) {
+	// Verify that adjacent partition ranges don't overlap
+	for i := uint32(0); i < 100; i++ {
+		start1, end1 := GetPartitionRange(i)
+		start2, end2 := GetPartitionRange(i + 1)
+
+		// end1 should equal start2 (non-overlapping, continuous)
+		if testCompareBytes(end1, start2) > 0 {
+			t.Errorf("partition %d and %d ranges overlap", i, i+1)
+		}
+
+		// Sanity check
+		if testCompareBytes(start1, end1) >= 0 {
+			t.Errorf("partition %d: start >= end", i)
+		}
+		if testCompareBytes(start2, end2) >= 0 {
+			t.Errorf("partition %d: start >= end", i+1)
+		}
 	}
 }
 
@@ -105,8 +155,6 @@ func TestPartitionDistribution(t *testing.T) {
 	}
 
 	// Check that we have a reasonable distribution
-	// With 10000 keys and 4096 partitions, we expect ~2.4 keys per partition on average
-	// But due to hash distribution, some variance is expected
 	minCount := 0
 	maxCount := 0
 	for _, count := range distribution {
@@ -126,6 +174,13 @@ func TestPartitionDistribution(t *testing.T) {
 	}
 }
 
+func TestTotalPartitionsConstant(t *testing.T) {
+	// Verify the constant is as expected
+	if TotalPartitions != 4096 {
+		t.Errorf("TotalPartitions = %d, want 4096", TotalPartitions)
+	}
+}
+
 func BenchmarkCalculatePartition(b *testing.B) {
 	key := []byte("benchmark-test-key-for-partition-calculation")
 	b.ResetTimer()
@@ -139,5 +194,13 @@ func BenchmarkMakePartitionKey(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		MakePartitionKey(1000, key)
+	}
+}
+
+func BenchmarkParsePartitionKey(b *testing.B) {
+	storageKey := MakePartitionKey(1000, []byte("benchmark-test-key"))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _, _ = ParsePartitionKey(storageKey)
 	}
 }
