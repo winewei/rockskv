@@ -113,7 +113,7 @@ func loadConfig(path string) (*storage.ServerConfig, error) {
 			DataDir:                  viper.GetString("rocksdb.data_dir"),
 			WALDir:                   viper.GetString("rocksdb.wal_dir"),
 			BlockCacheSize:           viper.GetInt64("rocksdb.block_cache_size"),
-			WriteBufferSize:          viper.GetUint64("rocksdb.write_buffer_size"),
+			WriteBufferSize:          viper.GetInt("rocksdb.write_buffer_size"),
 			MaxWriteBufferNumber:     viper.GetInt("rocksdb.max_write_buffer_number"),
 			MaxBackgroundCompactions: viper.GetInt("rocksdb.max_background_compactions"),
 			MaxBackgroundFlushes:     viper.GetInt("rocksdb.max_background_flushes"),
