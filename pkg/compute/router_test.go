@@ -131,11 +131,11 @@ func TestNewRouter(t *testing.T) {
 	// Check route table is initialized
 	table := router.GetRouteTable()
 	if table == nil {
-		t.Error("route table should not be nil")
+		t.Fatal("route table should not be nil")
 	}
 
 	if table.Partitions == nil {
-		t.Error("route table partitions should not be nil")
+		t.Fatal("route table partitions should not be nil")
 	}
 }
 

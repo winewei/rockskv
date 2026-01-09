@@ -335,26 +335,3 @@ func (s *Server) GetPartitionManager() *PartitionManager {
 func (s *Server) GetDB() *RocksDB {
 	return s.db
 }
-
-// compareBytes compares two byte slices
-func compareBytes(a, b []byte) int {
-	minLen := len(a)
-	if len(b) < minLen {
-		minLen = len(b)
-	}
-	for i := 0; i < minLen; i++ {
-		if a[i] < b[i] {
-			return -1
-		}
-		if a[i] > b[i] {
-			return 1
-		}
-	}
-	if len(a) < len(b) {
-		return -1
-	}
-	if len(a) > len(b) {
-		return 1
-	}
-	return 0
-}

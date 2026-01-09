@@ -6,6 +6,10 @@ on:
     types:
       - completed
 
+permissions:
+  contents: write
+  actions: read
+
 jobs:
   auto-fix:
     name: Auto Fix with Claude

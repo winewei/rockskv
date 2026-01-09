@@ -132,8 +132,8 @@ func TestNodeInfoEmptyPartitions(t *testing.T) {
 		Role: NodeRoleCompute,
 	}
 
-	if node.Partitions != nil && len(node.Partitions) != 0 {
-		t.Error("Partitions should be nil or empty for compute node")
+	if len(node.Partitions) != 0 {
+		t.Error("Partitions should be empty for compute node")
 	}
 }
 
