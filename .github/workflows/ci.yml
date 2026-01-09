@@ -8,6 +8,7 @@ on:
 
 env:
   GO_VERSION: '1.21'
+  ROCKSDB_VERSION: '9.7.4'
 
 jobs:
   # Build and test without CGO (stub implementation)
@@ -54,10 +55,38 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
         cache: true
 
-    - name: Install RocksDB from apt
+    - name: Install build dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y librocksdb-dev
+        sudo apt-get install -y \
+          build-essential \
+          libgflags-dev \
+          libsnappy-dev \
+          zlib1g-dev \
+          libbz2-dev \
+          liblz4-dev \
+          libzstd-dev
+
+    - name: Cache RocksDB
+      id: cache-rocksdb
+      uses: actions/cache@v4
+      with:
+        path: ~/rocksdb-${{ env.ROCKSDB_VERSION }}
+        key: rocksdb-${{ env.ROCKSDB_VERSION }}-ubuntu-24.04-v1
+
+    - name: Build RocksDB from source
+      if: steps.cache-rocksdb.outputs.cache-hit != 'true'
+      run: |
+        cd ~
+        git clone --depth 1 --branch v${{ env.ROCKSDB_VERSION }} https://github.com/facebook/rocksdb.git rocksdb-${{ env.ROCKSDB_VERSION }}
+        cd rocksdb-${{ env.ROCKSDB_VERSION }}
+        make shared_lib -j$(nproc)
+
+    - name: Install RocksDB
+      run: |
+        cd ~/rocksdb-${{ env.ROCKSDB_VERSION }}
+        sudo make install-shared INSTALL_PATH=/usr/local
+        sudo ldconfig
 
     - name: Download Go modules
       run: go mod download
@@ -115,10 +144,38 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
         cache: true
 
-    - name: Install RocksDB from apt
+    - name: Install build dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y librocksdb-dev
+        sudo apt-get install -y \
+          build-essential \
+          libgflags-dev \
+          libsnappy-dev \
+          zlib1g-dev \
+          libbz2-dev \
+          liblz4-dev \
+          libzstd-dev
+
+    - name: Cache RocksDB
+      id: cache-rocksdb
+      uses: actions/cache@v4
+      with:
+        path: ~/rocksdb-${{ env.ROCKSDB_VERSION }}
+        key: rocksdb-${{ env.ROCKSDB_VERSION }}-ubuntu-24.04-v1
+
+    - name: Build RocksDB from source
+      if: steps.cache-rocksdb.outputs.cache-hit != 'true'
+      run: |
+        cd ~
+        git clone --depth 1 --branch v${{ env.ROCKSDB_VERSION }} https://github.com/facebook/rocksdb.git rocksdb-${{ env.ROCKSDB_VERSION }}
+        cd rocksdb-${{ env.ROCKSDB_VERSION }}
+        make shared_lib -j$(nproc)
+
+    - name: Install RocksDB
+      run: |
+        cd ~/rocksdb-${{ env.ROCKSDB_VERSION }}
+        sudo make install-shared INSTALL_PATH=/usr/local
+        sudo ldconfig
 
     - name: Build all binaries
       run: make build
