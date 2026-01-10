@@ -12,6 +12,16 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 BUILD_TIME ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 
+# RocksDB CGO 配置 (自动检测 Homebrew 路径)
+# macOS: 检测 Homebrew 前缀 (Apple Silicon: /opt/homebrew, Intel: /usr/local)
+# Linux: 使用标准系统路径
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    HOMEBREW_PREFIX := $(shell brew --prefix 2>/dev/null || echo "/opt/homebrew")
+    export CGO_CFLAGS := -I$(HOMEBREW_PREFIX)/include
+    export CGO_LDFLAGS := -L$(HOMEBREW_PREFIX)/lib
+endif
+
 # 二进制输出目录
 BINDIR=bin
 

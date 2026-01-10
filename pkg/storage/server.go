@@ -16,6 +16,8 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 
 	"github.com/winewei/rockskv/pkg/common"
@@ -50,6 +52,8 @@ type Server struct {
 	db               *RocksDB
 	partitionManager *PartitionManager
 	grpcServer       *grpc.Server
+	metadataConn     *grpc.ClientConn
+	metadataClient   pb.MetadataServiceClient
 	logger           *zap.Logger
 }
 
@@ -93,6 +97,17 @@ func (s *Server) Start() error {
 	}
 
 	s.grpcServer = grpc.NewServer(
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             5 * time.Second,
+			PermitWithoutStream: true,
+		}),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			MaxConnectionIdle:     15 * time.Minute,
+			MaxConnectionAge:      30 * time.Minute,
+			MaxConnectionAgeGrace: 5 * time.Second,
+			Time:                  10 * time.Second,
+			Timeout:               3 * time.Second,
+		}),
 		grpc.UnaryInterceptor(s.unaryInterceptor),
 		grpc.StreamInterceptor(s.streamInterceptor),
 	)
@@ -102,6 +117,9 @@ func (s *Server) Start() error {
 		zap.String("addr", s.config.ListenAddr),
 		zap.String("node_id", s.config.NodeID),
 	)
+
+	// Register with metadata service in background
+	go s.registerWithMetadata()
 
 	return s.grpcServer.Serve(listener)
 }
@@ -380,6 +398,23 @@ func (s *Server) ExportSST(req *pb.ExportSSTRequest, stream pb.StorageService_Ex
 		return status.Errorf(codes.Internal, "iterator error: %v", err)
 	}
 
+	// Handle empty partition - send empty chunk to signal successful empty migration
+	if keyCount == 0 {
+		s.logger.Info("Empty partition, sending empty migration signal",
+			zap.Uint32("partition_id", req.PartitionId),
+		)
+		// Send a single chunk indicating empty partition
+		if err := stream.Send(&pb.SSTChunk{
+			Filename:    fmt.Sprintf("partition_%d_empty.sst", req.PartitionId),
+			IsLast:      true,
+			PartitionId: req.PartitionId,
+		}); err != nil {
+			return err
+		}
+		os.Remove(sstPath)
+		return nil
+	}
+
 	if err := sstWriter.Finish(); err != nil {
 		return status.Errorf(codes.Internal, "failed to finish sst: %v", err)
 	}
@@ -437,6 +472,8 @@ func (s *Server) IngestSST(stream pb.StorageService_IngestSSTServer) error {
 	var sstPath string
 	var file *os.File
 	var keysIngested int64
+	var partitionId uint32
+	var hasData bool
 
 	for {
 		chunk, err := stream.Recv()
@@ -447,8 +484,30 @@ func (s *Server) IngestSST(stream pb.StorageService_IngestSSTServer) error {
 			return err
 		}
 
-		if file == nil {
+		if partitionId == 0 && chunk.PartitionId != 0 {
+			partitionId = chunk.PartitionId
+		}
+
+		// Handle empty partition migration
+		if chunk.IsLast && len(chunk.Data) == 0 && !hasData {
+			s.logger.Info("Received empty partition migration",
+				zap.Uint32("partition_id", partitionId),
+			)
+			// Empty partition - just add to partition manager
+			if partitionId != 0 && !s.partitionManager.HasPartition(partitionId) {
+				if err := s.partitionManager.AddPartition(partitionId, false); err != nil {
+					s.logger.Warn("Failed to add empty partition", zap.Error(err))
+				}
+			}
+			return stream.SendAndClose(&pb.IngestSSTResponse{
+				Success:      true,
+				KeysIngested: 0,
+			})
+		}
+
+		if file == nil && len(chunk.Data) > 0 {
 			sstPath = filepath.Join(s.config.SSTDir, chunk.Filename)
+			var err error
 			file, err = os.Create(sstPath)
 			if err != nil {
 				return status.Errorf(codes.Internal, "failed to create sst file: %v", err)
@@ -456,6 +515,7 @@ func (s *Server) IngestSST(stream pb.StorageService_IngestSSTServer) error {
 		}
 
 		if len(chunk.Data) > 0 {
+			hasData = true
 			if _, err := file.Write(chunk.Data); err != nil {
 				file.Close()
 				os.Remove(sstPath)
@@ -472,8 +532,12 @@ func (s *Server) IngestSST(stream pb.StorageService_IngestSSTServer) error {
 		file.Close()
 	}
 
-	if sstPath == "" {
-		return status.Errorf(codes.InvalidArgument, "no sst data received")
+	if sstPath == "" || !hasData {
+		// No actual data to ingest
+		return stream.SendAndClose(&pb.IngestSSTResponse{
+			Success:      true,
+			KeysIngested: 0,
+		})
 	}
 
 	// Ingest SST file
@@ -527,4 +591,165 @@ func compareBytes(a, b []byte) int {
 		return 1
 	}
 	return 0
+}
+
+// registerWithMetadata connects to metadata service and registers this storage node
+func (s *Server) registerWithMetadata() {
+	time.Sleep(time.Second)
+
+	for {
+		if err := s.doRegister(); err != nil {
+			s.logger.Warn("Failed to register with metadata, retrying...",
+				zap.Error(err),
+			)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		break
+	}
+
+	go s.subscribeRouteUpdates()
+	s.heartbeatLoop()
+}
+
+func (s *Server) doRegister() error {
+	conn, err := grpc.Dial(
+		s.config.MetadataAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to connect to metadata: %w", err)
+	}
+	s.metadataConn = conn
+	s.metadataClient = pb.NewMetadataServiceClient(conn)
+
+	addr := s.config.ListenAddr
+	if addr[0] == ':' {
+		addr = "localhost" + addr
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := s.metadataClient.RegisterNode(ctx, &pb.RegisterNodeRequest{
+		NodeId: s.config.NodeID,
+		Addr:   addr,
+		Role:   pb.NodeRole_STORAGE,
+	})
+	if err != nil {
+		return fmt.Errorf("register failed: %w", err)
+	}
+
+	if !resp.Success {
+		return fmt.Errorf("register returned failure")
+	}
+
+	s.logger.Info("Registered with metadata service",
+		zap.String("metadata_addr", s.config.MetadataAddr),
+		zap.String("node_id", s.config.NodeID),
+	)
+
+	return nil
+}
+
+func (s *Server) heartbeatLoop() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if s.metadataClient == nil {
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, err := s.metadataClient.Heartbeat(ctx, &pb.HeartbeatRequest{
+			NodeId: s.config.NodeID,
+		})
+		cancel()
+
+		if err != nil {
+			s.logger.Warn("Heartbeat failed", zap.Error(err))
+		}
+	}
+}
+
+func (s *Server) subscribeRouteUpdates() {
+	addr := s.config.ListenAddr
+	if addr[0] == ':' {
+		addr = "localhost" + addr
+	}
+
+	for {
+		if s.metadataClient == nil {
+			time.Sleep(time.Second)
+			continue
+		}
+
+		stream, err := s.metadataClient.SubscribeRouteUpdates(context.Background(), &pb.SubscribeRequest{
+			NodeId: s.config.NodeID,
+		})
+		if err != nil {
+			s.logger.Warn("Failed to subscribe to route updates", zap.Error(err))
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		for {
+			update, err := stream.Recv()
+			if err != nil {
+				s.logger.Warn("Route subscription stream error", zap.Error(err))
+				break
+			}
+
+			s.updatePartitionsFromRoute(update.Partitions, addr)
+		}
+	}
+}
+
+func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAddr string) {
+	shouldExist := make(map[uint32]bool)
+	addedCount := 0
+	removedCount := 0
+
+	for _, p := range partitions {
+		isPrimary := p.Primary == myAddr
+		isReplica := p.Replica == myAddr
+
+		if isPrimary || isReplica {
+			shouldExist[p.PartitionId] = true
+
+			if !s.partitionManager.HasPartition(p.PartitionId) {
+				if err := s.partitionManager.AddPartition(p.PartitionId, isPrimary); err != nil {
+					s.logger.Warn("Failed to add partition",
+						zap.Uint32("partition_id", p.PartitionId),
+						zap.Error(err),
+					)
+				} else {
+					addedCount++
+				}
+			}
+		}
+	}
+
+	currentPartitions := s.partitionManager.ListPartitions()
+	for _, partitionID := range currentPartitions {
+		if !shouldExist[partitionID] {
+			if err := s.partitionManager.RemovePartition(partitionID); err != nil {
+				s.logger.Warn("Failed to remove partition",
+					zap.Uint32("partition_id", partitionID),
+					zap.Error(err),
+				)
+			} else {
+				removedCount++
+			}
+		}
+	}
+
+	if addedCount > 0 || removedCount > 0 {
+		s.logger.Info("Partitions updated from route table",
+			zap.Int("added", addedCount),
+			zap.Int("removed", removedCount),
+			zap.Int("total", s.partitionManager.PartitionCount()),
+		)
+	}
 }

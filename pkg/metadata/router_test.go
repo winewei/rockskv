@@ -9,15 +9,17 @@ import (
 
 // mockStore is a mock implementation of the Store interface for testing
 type mockStore struct {
-	routeTable *RouteTable
-	nodes      map[string]*NodeInfo
-	mu         sync.RWMutex
+	routeTable      *RouteTable
+	nodes           map[string]*NodeInfo
+	migrationStates map[uint32]*MigrationInfo
+	mu              sync.RWMutex
 }
 
 func newMockStore() *mockStore {
 	return &mockStore{
-		routeTable: NewRouteTable(),
-		nodes:      make(map[string]*NodeInfo),
+		routeTable:      NewRouteTable(),
+		nodes:           make(map[string]*NodeInfo),
+		migrationStates: make(map[uint32]*MigrationInfo),
 	}
 }
 
@@ -97,6 +99,26 @@ func (m *mockStore) WatchNodes(ctx context.Context) (<-chan *NodeEvent, error) {
 }
 
 func (m *mockStore) Close() error {
+	return nil
+}
+
+func (m *mockStore) SetMigrationState(ctx context.Context, partitionID uint32, state *MigrationInfo) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.migrationStates[partitionID] = state
+	return nil
+}
+
+func (m *mockStore) GetMigrationState(ctx context.Context, partitionID uint32) (*MigrationInfo, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.migrationStates[partitionID], nil
+}
+
+func (m *mockStore) DeleteMigrationState(ctx context.Context, partitionID uint32) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.migrationStates, partitionID)
 	return nil
 }
 
