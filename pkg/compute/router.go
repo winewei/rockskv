@@ -11,8 +11,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/example/rockskv/pkg/common"
-	pb "github.com/example/rockskv/pkg/proto"
+	"github.com/winewei/rockskv/pkg/common"
+	pb "github.com/winewei/rockskv/pkg/proto"
 )
 
 const (
@@ -31,10 +31,12 @@ type RouteTable struct {
 
 // PartitionInfo contains routing info for a partition
 type PartitionInfo struct {
-	ID      uint32
-	Primary string
-	Replica string
-	Status  pb.PartitionStatus
+	ID              uint32
+	Primary         string
+	Replica         string
+	Status          pb.PartitionStatus
+	MigrationTarget string
+	MigrationState  pb.MigrationState
 }
 
 // Router handles partition routing
@@ -130,6 +132,51 @@ func (r *Router) GetPartitionNodesByID(partitionID uint32) (primary, replica str
 	return partition.Primary, partition.Replica, partitionID, nil
 }
 
+// GetWriteTargets returns all nodes that should receive writes for a key
+// During migration, this includes the shadow write target
+func (r *Router) GetWriteTargets(key []byte) (targets []string, partitionID uint32, err error) {
+	partitionID = CalculatePartition(key)
+	return r.GetWriteTargetsByID(partitionID)
+}
+
+// GetWriteTargetsByID returns all nodes that should receive writes for a partition ID
+func (r *Router) GetWriteTargetsByID(partitionID uint32) (targets []string, pid uint32, err error) {
+	table := r.routeTable.Load().(*RouteTable)
+
+	partition, ok := table.Partitions[partitionID]
+	if !ok {
+		return nil, partitionID, fmt.Errorf("partition %d not found in route table", partitionID)
+	}
+
+	// Always include primary and replica
+	targets = []string{partition.Primary, partition.Replica}
+
+	// During migration, also include the migration target for shadow writes
+	if partition.MigrationState == pb.MigrationState_MIGRATION_COPYING ||
+		partition.MigrationState == pb.MigrationState_MIGRATION_CATCHUP {
+		if partition.MigrationTarget != "" &&
+			partition.MigrationTarget != partition.Primary &&
+			partition.MigrationTarget != partition.Replica {
+			targets = append(targets, partition.MigrationTarget)
+		}
+	}
+
+	return targets, partitionID, nil
+}
+
+// IsMigrating returns true if the partition is being migrated
+func (r *Router) IsMigrating(partitionID uint32) bool {
+	table := r.routeTable.Load().(*RouteTable)
+
+	partition, ok := table.Partitions[partitionID]
+	if !ok {
+		return false
+	}
+
+	return partition.MigrationState != pb.MigrationState_MIGRATION_NONE &&
+		partition.MigrationState != pb.MigrationState_MIGRATION_COMPLETE
+}
+
 // GetRouteTable returns the current route table
 func (r *Router) GetRouteTable() *RouteTable {
 	return r.routeTable.Load().(*RouteTable)
@@ -206,10 +253,12 @@ func (r *Router) updateRouteTable(pbTable *pb.RouteTable) {
 
 	for _, p := range pbTable.Partitions {
 		newTable.Partitions[p.PartitionId] = &PartitionInfo{
-			ID:      p.PartitionId,
-			Primary: p.Primary,
-			Replica: p.Replica,
-			Status:  p.Status,
+			ID:              p.PartitionId,
+			Primary:         p.Primary,
+			Replica:         p.Replica,
+			Status:          p.Status,
+			MigrationTarget: p.MigrationTarget,
+			MigrationState:  p.MigrationState,
 		}
 	}
 
@@ -244,10 +293,12 @@ func (r *Router) updateRouteTableFromUpdate(update *pb.RouteUpdate) {
 	// Apply updates
 	for _, p := range update.Partitions {
 		newTable.Partitions[p.PartitionId] = &PartitionInfo{
-			ID:      p.PartitionId,
-			Primary: p.Primary,
-			Replica: p.Replica,
-			Status:  p.Status,
+			ID:              p.PartitionId,
+			Primary:         p.Primary,
+			Replica:         p.Replica,
+			Status:          p.Status,
+			MigrationTarget: p.MigrationTarget,
+			MigrationState:  p.MigrationState,
 		}
 	}
 

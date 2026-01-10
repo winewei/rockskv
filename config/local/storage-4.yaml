@@ -1,0 +1,19 @@
+# Storage Node 4 Configuration - Local Development
+node_id: "storage-4"
+listen_addr: ":9004"
+metadata_addr: "localhost:9000"
+metrics_addr: ":9094"
+sst_dir: "./data/sst4"
+
+# RocksDB Configuration
+rocksdb:
+  data_dir: "./data/storage4"
+  wal_dir: "./data/storage4/wal"
+  block_cache_size: 268435456
+  write_buffer_size: 33554432
+  max_write_buffer_number: 2
+  max_background_compactions: 2
+  max_background_flushes: 1
+  target_file_size_base: 33554432
+  max_bytes_for_level_base: 134217728
+  compression_type: "lz4"

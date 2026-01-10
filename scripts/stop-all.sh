@@ -53,14 +53,15 @@ stop_service() {
 }
 
 # Stop in reverse order
+stop_service "compute-2"
 stop_service "compute"
+stop_service "storage-4"
+stop_service "storage-3"
 stop_service "storage-2"
 stop_service "storage"
 stop_service "metadata"
+stop_service "etcd"
 
 echo ""
 echo -e "${GREEN}All RocksKV services stopped.${NC}"
-echo ""
-echo "Note: etcd is not stopped automatically."
-echo "To stop etcd: pkill etcd"
 echo ""

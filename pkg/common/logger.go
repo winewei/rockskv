@@ -23,6 +23,8 @@ func InitLogger(level string, development bool) error {
 		config = zap.NewProductionConfig()
 	}
 	config.Level = zap.NewAtomicLevelAt(zapLevel)
+	config.OutputPaths = []string{"stderr"}
+	config.ErrorOutputPaths = []string{"stderr"}
 
 	var err error
 	logger, err = config.Build()
@@ -54,9 +56,15 @@ func Sync() {
 }
 
 func init() {
-	// Default logger for early initialization
-	logger, _ = zap.NewProduction()
+	// Default logger for early initialization - always write to stderr
+	cfg := zap.NewProductionConfig()
+	cfg.OutputPaths = []string{"stderr"}
+	cfg.ErrorOutputPaths = []string{"stderr"}
+	logger, _ = cfg.Build()
 	if os.Getenv("ENV") == "development" {
-		logger, _ = zap.NewDevelopment()
+		devCfg := zap.NewDevelopmentConfig()
+		devCfg.OutputPaths = []string{"stderr"}
+		devCfg.ErrorOutputPaths = []string{"stderr"}
+		logger, _ = devCfg.Build()
 	}
 }

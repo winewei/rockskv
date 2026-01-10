@@ -57,7 +57,10 @@ fi
 check_service "metadata" 9000
 check_service "storage" 9001
 check_service "storage-2" 9002
+check_service "storage-3" 9003
+check_service "storage-4" 9004
 check_service "compute" 8000
+check_service "compute-2" 8001
 
 echo ""
 echo "Log files: $PROJECT_DIR/logs/"

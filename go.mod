@@ -1,4 +1,4 @@
-module github.com/example/rockskv
+module github.com/winewei/rockskv
 
 go 1.24.0
 
@@ -6,6 +6,7 @@ toolchain go1.24.7
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
+	github.com/google/uuid v1.6.0
 	github.com/linxGnu/grocksdb v1.10.4
 	github.com/prometheus/client_golang v1.18.0
 	github.com/spf13/viper v1.18.2

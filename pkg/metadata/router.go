@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
-	"github.com/example/rockskv/pkg/common"
+	"github.com/winewei/rockskv/pkg/common"
+	pb "github.com/winewei/rockskv/pkg/proto"
 )
 
 const (
@@ -260,8 +262,7 @@ func (r *Router) RebalancePartitions(ctx context.Context) error {
 			return fmt.Errorf("failed to save route table: %w", err)
 		}
 
-		r.updateRouteTable(newTable)
-		r.notifySubscribers(newTable)
+		// Don't manually update - let etcd watch handle it to avoid duplicate notifications
 
 		r.logger.Info("Partitions rebalanced",
 			zap.Int("changes", changes),
@@ -275,9 +276,10 @@ func (r *Router) RebalancePartitions(ctx context.Context) error {
 // PromoteReplica promotes a replica to primary for a partition
 func (r *Router) PromoteReplica(ctx context.Context, partitionID uint32) error {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	partition, ok := r.routeTable.Partitions[partitionID]
 	if !ok {
-		r.mu.Unlock()
 		return fmt.Errorf("partition %d not found", partitionID)
 	}
 
@@ -301,14 +303,13 @@ func (r *Router) PromoteReplica(ctx context.Context, partitionID uint32) error {
 	// Swap for the target partition
 	newTable.Partitions[partitionID].Primary = partition.Replica
 	newTable.Partitions[partitionID].Replica = partition.Primary
-	r.mu.Unlock()
 
+	// Save to etcd while holding lock to prevent concurrent modifications
 	if err := r.store.UpdateRouteTable(ctx, newTable); err != nil {
 		return fmt.Errorf("failed to save route table: %w", err)
 	}
 
-	r.updateRouteTable(newTable)
-	r.notifySubscribers(newTable)
+	// Don't manually update - let etcd watch handle it to avoid duplicate notifications
 
 	r.logger.Info("Replica promoted to primary",
 		zap.Uint32("partition_id", partitionID),
@@ -321,8 +322,9 @@ func (r *Router) PromoteReplica(ctx context.Context, partitionID uint32) error {
 // SetPartitionStatus updates the status of a partition
 func (r *Router) SetPartitionStatus(ctx context.Context, partitionID uint32, status PartitionStatus) error {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if _, ok := r.routeTable.Partitions[partitionID]; !ok {
-		r.mu.Unlock()
 		return fmt.Errorf("partition %d not found", partitionID)
 	}
 
@@ -335,22 +337,218 @@ func (r *Router) SetPartitionStatus(ctx context.Context, partitionID uint32, sta
 	// Copy all partitions
 	for id, p := range r.routeTable.Partitions {
 		newTable.Partitions[id] = &PartitionInfo{
-			ID:      p.ID,
-			Primary: p.Primary,
-			Replica: p.Replica,
-			Status:  p.Status,
+			ID:              p.ID,
+			Primary:         p.Primary,
+			Replica:         p.Replica,
+			Status:          p.Status,
+			MigrationTarget: p.MigrationTarget,
+			MigrationState:  p.MigrationState,
 		}
 	}
 
 	newTable.Partitions[partitionID].Status = status
-	r.mu.Unlock()
 
+	// Save to etcd while holding lock to prevent concurrent modifications
 	if err := r.store.UpdateRouteTable(ctx, newTable); err != nil {
 		return fmt.Errorf("failed to save route table: %w", err)
 	}
 
-	r.updateRouteTable(newTable)
-	r.notifySubscribers(newTable)
+	// Don't manually update - let etcd watch handle it to avoid duplicate notifications
 
 	return nil
+}
+
+// SetPartitionMigration marks a partition as being migrated
+func (r *Router) SetPartitionMigration(ctx context.Context, partitionID uint32, targetNode string, state pb.MigrationState) error {
+	// Retry up to 5 times on version conflicts
+	maxRetries := 5
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		err := r.setPartitionMigrationOnce(ctx, partitionID, targetNode, state)
+		if err == nil {
+			return nil
+		}
+
+		// Check if it's a version conflict error
+		if attempt < maxRetries-1 && (strings.Contains(err.Error(), "version conflict") ||
+			strings.Contains(err.Error(), "update conflict")) {
+			// Reload route table and retry
+			r.logger.Warn("Route table conflict, retrying",
+				zap.Uint32("partition_id", partitionID),
+				zap.Int("attempt", attempt+1),
+			)
+			time.Sleep(time.Duration(attempt+1) * 50 * time.Millisecond)
+
+			// Reload latest route table
+			table, getErr := r.store.GetRouteTable(ctx)
+			if getErr != nil {
+				return fmt.Errorf("failed to reload route table: %w", getErr)
+			}
+			r.mu.Lock()
+			r.routeTable = table
+			r.mu.Unlock()
+			continue
+		}
+
+		return err
+	}
+
+	return fmt.Errorf("failed to set migration after %d retries", maxRetries)
+}
+
+func (r *Router) setPartitionMigrationOnce(ctx context.Context, partitionID uint32, targetNode string, state pb.MigrationState) error {
+	r.mu.RLock()
+	partition, ok := r.routeTable.Partitions[partitionID]
+	if !ok {
+		r.mu.RUnlock()
+		return fmt.Errorf("partition %d not found", partitionID)
+	}
+
+	// Determine if this is a primary or replica migration
+	isPrimaryMove := partition.Primary != targetNode
+	r.mu.RUnlock()
+
+	// Store migration state separately (not in route table)
+	// This reduces write size from 382KB to ~200B (1900x reduction!)
+	migrationInfo := &MigrationInfo{
+		PartitionID:   partitionID,
+		Target:        targetNode,
+		State:         state,
+		IsPrimaryMove: isPrimaryMove,
+		StartedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+
+	if err := r.store.SetMigrationState(ctx, partitionID, migrationInfo); err != nil {
+		return err
+	}
+
+	r.logger.Info("Partition migration state set",
+		zap.Uint32("partition_id", partitionID),
+		zap.String("target", targetNode),
+		zap.Int32("state", int32(state)),
+	)
+
+	return nil
+}
+
+// CompleteMigration finalizes a partition migration
+func (r *Router) CompleteMigration(ctx context.Context, partitionID uint32, newNode string, isPrimary bool) error {
+	// Retry up to 5 times on version conflicts
+	maxRetries := 5
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		err := r.completeMigrationOnce(ctx, partitionID, newNode, isPrimary)
+		if err == nil {
+			return nil
+		}
+
+		// Check if it's a version conflict error
+		if attempt < maxRetries-1 && (err.Error() == "route table update conflict: another update happened concurrently" ||
+			strings.Contains(err.Error(), "version conflict")) {
+			// Reload route table and retry
+			r.logger.Warn("Route table conflict, retrying",
+				zap.Uint32("partition_id", partitionID),
+				zap.Int("attempt", attempt+1),
+			)
+			time.Sleep(time.Duration(attempt+1) * 50 * time.Millisecond)
+
+			// Reload latest route table
+			table, getErr := r.store.GetRouteTable(ctx)
+			if getErr != nil {
+				return fmt.Errorf("failed to reload route table: %w", getErr)
+			}
+			r.mu.Lock()
+			r.routeTable = table
+			r.mu.Unlock()
+			continue
+		}
+
+		return err
+	}
+
+	return fmt.Errorf("failed to complete migration after %d retries", maxRetries)
+}
+
+func (r *Router) completeMigrationOnce(ctx context.Context, partitionID uint32, newNode string, isPrimary bool) error {
+	// First, delete the migration state (cleanup temporary data)
+	if err := r.store.DeleteMigrationState(ctx, partitionID); err != nil {
+		r.logger.Warn("Failed to delete migration state (continuing anyway)",
+			zap.Uint32("partition_id", partitionID),
+			zap.Error(err),
+		)
+	}
+
+	// Now update the route table with the new routing (this IS necessary)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	partition, ok := r.routeTable.Partitions[partitionID]
+	if !ok {
+		return fmt.Errorf("partition %d not found", partitionID)
+	}
+
+	newTable := &RouteTable{
+		Version:    r.routeTable.Version,
+		Partitions: make(map[uint32]*PartitionInfo),
+		UpdatedAt:  time.Now(),
+	}
+
+	// Copy all partitions (without migration state fields)
+	for id, p := range r.routeTable.Partitions {
+		newTable.Partitions[id] = &PartitionInfo{
+			ID:      p.ID,
+			Primary: p.Primary,
+			Replica: p.Replica,
+			Status:  p.Status,
+			// MigrationTarget and MigrationState no longer stored here
+		}
+	}
+
+	// Update the migrated partition's actual routing
+	if isPrimary {
+		newTable.Partitions[partitionID].Primary = newNode
+		// Old primary becomes replica if still valid
+		if partition.Primary != newNode {
+			newTable.Partitions[partitionID].Replica = partition.Primary
+		}
+	} else {
+		newTable.Partitions[partitionID].Replica = newNode
+	}
+	newTable.Partitions[partitionID].Status = PartitionStatusNormal
+
+	// Save to etcd while holding lock to prevent concurrent modifications
+	if err := r.store.UpdateRouteTable(ctx, newTable); err != nil {
+		return err
+	}
+
+	// Don't manually update - let etcd watch handle it to avoid duplicate notifications
+
+	r.logger.Info("Partition migration completed",
+		zap.Uint32("partition_id", partitionID),
+		zap.String("new_node", newNode),
+		zap.Bool("is_primary", isPrimary),
+	)
+
+	return nil
+}
+
+// GetPartitionMigrationTarget returns the migration target for a partition
+// Now reads from separate migration state storage instead of route table
+func (r *Router) GetPartitionMigrationTarget(partitionID uint32) (string, pb.MigrationState) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	migrationInfo, err := r.store.GetMigrationState(ctx, partitionID)
+	if err != nil {
+		r.logger.Warn("Failed to get migration state",
+			zap.Uint32("partition_id", partitionID),
+			zap.Error(err),
+		)
+		return "", pb.MigrationState_MIGRATION_NONE
+	}
+
+	if migrationInfo == nil {
+		return "", pb.MigrationState_MIGRATION_NONE
+	}
+
+	return migrationInfo.Target, migrationInfo.State
 }

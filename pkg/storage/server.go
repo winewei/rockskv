@@ -18,8 +18,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/example/rockskv/pkg/common"
-	pb "github.com/example/rockskv/pkg/proto"
+	"github.com/winewei/rockskv/pkg/common"
+	pb "github.com/winewei/rockskv/pkg/proto"
 )
 
 // ServerConfig holds storage server configuration

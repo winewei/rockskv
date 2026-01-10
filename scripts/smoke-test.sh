@@ -55,7 +55,7 @@ run_test() {
 
     printf "  %-40s" "$name"
 
-    result=$(eval "$cmd" 2>&1) || true
+    result=$(eval "$cmd" 2>/dev/null) || true
 
     if echo "$result" | grep -q "$expected"; then
         echo -e "${GREEN}PASS${NC}"
@@ -77,7 +77,7 @@ run_test_exact() {
 
     printf "  %-40s" "$name"
 
-    result=$(eval "$cmd" 2>&1) || true
+    result=$(eval "$cmd" 2>/dev/null) || true
 
     if [ "$result" = "$expected" ]; then
         echo -e "${GREEN}PASS${NC}"
@@ -143,7 +143,7 @@ run_test_exact "Get existing key" \
 KEY_NONEXISTENT="${TEST_PREFIX}_nonexistent"
 run_test "Get non-existent key" \
     "$CLI_BINARY -addr $COMPUTE_ADDR get $KEY_NONEXISTENT" \
-    "not found"
+    "(nil)"
 
 # Test 4: Update existing key
 VALUE2="updated_value"
@@ -162,7 +162,7 @@ run_test "Delete key" \
 
 run_test "Verify key deleted" \
     "$CLI_BINARY -addr $COMPUTE_ADDR get $KEY1" \
-    "not found"
+    "(nil)"
 
 # Test 6: Multiple keys (test routing to different partitions)
 echo ""

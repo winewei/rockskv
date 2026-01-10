@@ -9,7 +9,7 @@ import (
 	"github.com/linxGnu/grocksdb"
 	"go.uber.org/zap"
 
-	"github.com/example/rockskv/pkg/common"
+	"github.com/winewei/rockskv/pkg/common"
 )
 
 // RocksDB wraps grocksdb.DB with convenience methods

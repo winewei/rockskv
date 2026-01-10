@@ -9,9 +9,10 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
-	"github.com/example/rockskv/pkg/common"
-	pb "github.com/example/rockskv/pkg/proto"
+	"github.com/winewei/rockskv/pkg/common"
+	pb "github.com/winewei/rockskv/pkg/proto"
 )
 
 // ServerConfig holds metadata server configuration
@@ -34,11 +35,12 @@ func DefaultServerConfig() *ServerConfig {
 type Server struct {
 	pb.UnimplementedMetadataServiceServer
 
-	config     *ServerConfig
-	store      Store
-	router     *Router
-	grpcServer *grpc.Server
-	logger     *zap.Logger
+	config              *ServerConfig
+	store               Store
+	router              *Router
+	migrationController *MigrationController
+	grpcServer          *grpc.Server
+	logger              *zap.Logger
 
 	// Subscriber management
 	subscribers map[string]pb.MetadataService_SubscribeRouteUpdatesServer
@@ -62,12 +64,16 @@ func NewServer(config *ServerConfig) (*Server, error) {
 	// Initialize router
 	router := NewRouter(store)
 
+	// Initialize migration controller
+	migrationController := NewMigrationController(nil, store, router)
+
 	server := &Server{
-		config:      config,
-		store:       store,
-		router:      router,
-		logger:      logger,
-		subscribers: make(map[string]pb.MetadataService_SubscribeRouteUpdatesServer),
+		config:              config,
+		store:               store,
+		router:              router,
+		migrationController: migrationController,
+		logger:              logger,
+		subscribers:         make(map[string]pb.MetadataService_SubscribeRouteUpdatesServer),
 	}
 
 	return server, nil
@@ -86,6 +92,17 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	s.grpcServer = grpc.NewServer(
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             5 * time.Second,  // Allow pings every 5 seconds
+			PermitWithoutStream: true,             // Allow pings even without active streams
+		}),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			MaxConnectionIdle:     15 * time.Minute, // Close idle connections after 15 minutes
+			MaxConnectionAge:      30 * time.Minute, // Maximum connection age
+			MaxConnectionAgeGrace: 5 * time.Second,  // Grace period for pending RPCs
+			Time:                  10 * time.Second, // Ping interval when no activity
+			Timeout:               3 * time.Second,  // Ping timeout
+		}),
 		grpc.UnaryInterceptor(s.unaryInterceptor),
 		grpc.StreamInterceptor(s.streamInterceptor),
 	)
@@ -252,10 +269,12 @@ func (s *Server) GetRouteTable(ctx context.Context, req *pb.GetRouteTableRequest
 	pbPartitions := make([]*pb.PartitionInfo, 0, len(table.Partitions))
 	for _, partition := range table.Partitions {
 		pbPartitions = append(pbPartitions, &pb.PartitionInfo{
-			PartitionId: partition.ID,
-			Primary:     partition.Primary,
-			Replica:     partition.Replica,
-			Status:      convertPartitionStatus(partition.Status),
+			PartitionId:     partition.ID,
+			Primary:         partition.Primary,
+			Replica:         partition.Replica,
+			Status:          convertPartitionStatus(partition.Status),
+			MigrationTarget: partition.MigrationTarget,
+			MigrationState:  partition.MigrationState,
 		})
 	}
 
@@ -321,10 +340,12 @@ func (s *Server) sendRouteUpdate(stream pb.MetadataService_SubscribeRouteUpdates
 	pbPartitions := make([]*pb.PartitionInfo, 0, len(table.Partitions))
 	for _, partition := range table.Partitions {
 		pbPartitions = append(pbPartitions, &pb.PartitionInfo{
-			PartitionId: partition.ID,
-			Primary:     partition.Primary,
-			Replica:     partition.Replica,
-			Status:      convertPartitionStatus(partition.Status),
+			PartitionId:     partition.ID,
+			Primary:         partition.Primary,
+			Replica:         partition.Replica,
+			Status:          convertPartitionStatus(partition.Status),
+			MigrationTarget: partition.MigrationTarget,
+			MigrationState:  partition.MigrationState,
 		})
 	}
 
@@ -363,4 +384,19 @@ func (s *Server) GetStore() Store {
 // InitializeCluster initializes the cluster with partition assignments
 func (s *Server) InitializeCluster(ctx context.Context) error {
 	return s.router.InitializePartitions(ctx)
+}
+
+// TriggerRebalance implements MetadataService.TriggerRebalance
+func (s *Server) TriggerRebalance(ctx context.Context, req *pb.TriggerRebalanceRequest) (*pb.TriggerRebalanceResponse, error) {
+	return s.migrationController.TriggerRebalance(ctx, req)
+}
+
+// GetMigrationStatus implements MetadataService.GetMigrationStatus
+func (s *Server) GetMigrationStatus(ctx context.Context, req *pb.GetMigrationStatusRequest) (*pb.GetMigrationStatusResponse, error) {
+	return s.migrationController.GetMigrationStatus(ctx, req)
+}
+
+// CancelMigration implements MetadataService.CancelMigration
+func (s *Server) CancelMigration(ctx context.Context, req *pb.CancelMigrationRequest) (*pb.CancelMigrationResponse, error) {
+	return s.migrationController.CancelMigration(ctx, req)
 }

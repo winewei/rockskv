@@ -3,6 +3,8 @@ package metadata
 import (
 	"context"
 	"time"
+
+	pb "github.com/winewei/rockskv/pkg/proto"
 )
 
 // Store defines the interface for metadata storage
@@ -23,6 +25,11 @@ type Store interface {
 	// Watch operations
 	WatchRouteTable(ctx context.Context) (<-chan *RouteTable, error)
 	WatchNodes(ctx context.Context) (<-chan *NodeEvent, error)
+
+	// Migration state operations (separate from route table)
+	SetMigrationState(ctx context.Context, partitionID uint32, state *MigrationInfo) error
+	GetMigrationState(ctx context.Context, partitionID uint32) (*MigrationInfo, error)
+	DeleteMigrationState(ctx context.Context, partitionID uint32) error
 
 	// Close closes the store
 	Close() error
@@ -57,10 +64,12 @@ type RouteTable struct {
 
 // PartitionInfo contains information about a partition
 type PartitionInfo struct {
-	ID      uint32          `json:"id"`
-	Primary string          `json:"primary"`
-	Replica string          `json:"replica"`
-	Status  PartitionStatus `json:"status"`
+	ID              uint32             `json:"id"`
+	Primary         string             `json:"primary"`
+	Replica         string             `json:"replica"`
+	Status          PartitionStatus    `json:"status"`
+	MigrationTarget string             `json:"migration_target,omitempty"`
+	MigrationState  pb.MigrationState  `json:"migration_state,omitempty"`
 }
 
 // PartitionStatus represents the status of a partition
@@ -88,6 +97,16 @@ const (
 	NodeEventRemoved NodeEventType = "removed"
 	NodeEventUpdated NodeEventType = "updated"
 )
+
+// MigrationInfo contains temporary migration state (separate from route table)
+type MigrationInfo struct {
+	PartitionID     uint32            `json:"partition_id"`
+	Target          string            `json:"target"`           // Target node address
+	State           pb.MigrationState `json:"state"`            // Current migration state
+	IsPrimaryMove   bool              `json:"is_primary_move"`  // true if migrating primary, false if replica
+	StartedAt       time.Time         `json:"started_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
+}
 
 // NewRouteTable creates a new empty route table
 func NewRouteTable() *RouteTable {

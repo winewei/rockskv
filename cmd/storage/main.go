@@ -12,8 +12,8 @@ import (
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 
-	"github.com/example/rockskv/pkg/common"
-	"github.com/example/rockskv/pkg/storage"
+	"github.com/winewei/rockskv/pkg/common"
+	"github.com/winewei/rockskv/pkg/storage"
 )
 
 func main() {

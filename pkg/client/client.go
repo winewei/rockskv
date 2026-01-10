@@ -10,8 +10,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/example/rockskv/pkg/common"
-	pb "github.com/example/rockskv/pkg/proto"
+	"github.com/winewei/rockskv/pkg/common"
+	pb "github.com/winewei/rockskv/pkg/proto"
 )
 
 // Config holds client configuration

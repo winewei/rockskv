@@ -2,14 +2,15 @@ package storage
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"sync"
 
 	"github.com/cespare/xxhash/v2"
 	"go.uber.org/zap"
 
-	"github.com/example/rockskv/pkg/common"
-	pb "github.com/example/rockskv/pkg/proto"
+	"github.com/winewei/rockskv/pkg/common"
+	pb "github.com/winewei/rockskv/pkg/proto"
 )
 
 const (
@@ -261,6 +262,18 @@ func (pm *PartitionManager) PartitionCount() int {
 	return len(pm.partitions)
 }
 
+// ListPartitions returns a list of all partition IDs on this node
+func (pm *PartitionManager) ListPartitions() []uint32 {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	partitions := make([]uint32, 0, len(pm.partitions))
+	for id := range pm.partitions {
+		partitions = append(partitions, id)
+	}
+	return partitions
+}
+
 // UpdateFromRouteTable updates partitions based on route table
 func (pm *PartitionManager) UpdateFromRouteTable(routeTable *pb.RouteTable) error {
 	pm.mu.Lock()
@@ -307,6 +320,152 @@ func (pm *PartitionManager) UpdateFromRouteTable(routeTable *pb.RouteTable) erro
 			)
 		}
 	}
+
+	return nil
+}
+
+// PartitionData represents serializable partition data
+type PartitionData struct {
+	PartitionID uint32            `json:"partition_id"`
+	KeyValues   map[string]string `json:"key_values"`
+}
+
+// ExportPartitionData exports all data from a partition as JSON bytes
+func (pm *PartitionManager) ExportPartitionData(partitionID uint32) ([]byte, error) {
+	if !pm.HasPartition(partitionID) {
+		return nil, fmt.Errorf("partition %d not found on this node", partitionID)
+	}
+
+	// Get the key range for this partition
+	startKey, endKey := GetPartitionRange(partitionID)
+
+	// Iterate through all keys in the range
+	data := &PartitionData{
+		PartitionID: partitionID,
+		KeyValues:   make(map[string]string),
+	}
+
+	iter := pm.db.NewIterator()
+	defer iter.Close()
+
+	iter.Seek(startKey)
+	for iter.Valid() {
+		key := iter.Key().Data()
+
+		// Check if we've passed the end of the partition range
+		if len(key) >= len(endKey) {
+			keyPrefix := key[:len(endKey)]
+			if string(keyPrefix) >= string(endKey) {
+				break
+			}
+		}
+
+		// Parse the key to extract the original key
+		pID, originalKey, err := ParsePartitionKey(key)
+		if err != nil || pID != partitionID {
+			iter.Next()
+			continue
+		}
+
+		value := iter.Value().Data()
+		data.KeyValues[string(originalKey)] = string(value)
+
+		iter.Next()
+	}
+
+	pm.logger.Info("Exporting partition data",
+		zap.Uint32("partition_id", partitionID),
+		zap.Int("key_count", len(data.KeyValues)),
+	)
+
+	return json.Marshal(data)
+}
+
+// ImportPartitionData imports data into a partition from JSON bytes
+func (pm *PartitionManager) ImportPartitionData(partitionID uint32, jsonData []byte) (int64, error) {
+	// Ensure partition exists (add if not)
+	pm.mu.Lock()
+	if _, exists := pm.partitions[partitionID]; !exists {
+		pm.partitions[partitionID] = &Partition{
+			ID:      partitionID,
+			Status:  pb.PartitionStatus_MIGRATING_IN,
+			IsPrime: false,
+		}
+		common.PartitionGauge.WithLabelValues(pb.PartitionStatus_MIGRATING_IN.String()).Inc()
+	}
+	pm.mu.Unlock()
+
+	var data PartitionData
+	if err := json.Unmarshal(jsonData, &data); err != nil {
+		return 0, fmt.Errorf("failed to unmarshal partition data: %w", err)
+	}
+
+	// Verify partition ID matches
+	if data.PartitionID != partitionID {
+		return 0, fmt.Errorf("partition ID mismatch: expected %d, got %d", partitionID, data.PartitionID)
+	}
+
+	// Import all key-value pairs
+	items := make([]KeyValueItem, 0, len(data.KeyValues))
+	for key, value := range data.KeyValues {
+		storageKey := MakePartitionKey(partitionID, []byte(key))
+		items = append(items, KeyValueItem{
+			Key:   storageKey,
+			Value: []byte(value),
+		})
+	}
+
+	if len(items) > 0 {
+		if err := pm.db.BatchPut(items); err != nil {
+			return 0, fmt.Errorf("failed to batch put: %w", err)
+		}
+	}
+
+	pm.logger.Info("Imported partition data",
+		zap.Uint32("partition_id", partitionID),
+		zap.Int("key_count", len(items)),
+	)
+
+	return int64(len(items)), nil
+}
+
+// ClearPartitionData removes all data for a partition
+func (pm *PartitionManager) ClearPartitionData(partitionID uint32) error {
+	startKey, endKey := GetPartitionRange(partitionID)
+
+	// Iterate and delete all keys in range
+	iter := pm.db.NewIterator()
+	defer iter.Close()
+
+	var keysToDelete [][]byte
+	iter.Seek(startKey)
+	for iter.Valid() {
+		key := iter.Key().Data()
+
+		if len(key) >= len(endKey) {
+			keyPrefix := key[:len(endKey)]
+			if string(keyPrefix) >= string(endKey) {
+				break
+			}
+		}
+
+		keyCopy := make([]byte, len(key))
+		copy(keyCopy, key)
+		keysToDelete = append(keysToDelete, keyCopy)
+
+		iter.Next()
+	}
+
+	for _, key := range keysToDelete {
+		if err := pm.db.Delete(key); err != nil {
+			return fmt.Errorf("failed to delete key: %w", err)
+		}
+	}
+
+	pm.logger.Info("Cleared partition data",
+		zap.Uint32("partition_id", partitionID),
+		zap.Int("keys_deleted", len(keysToDelete)),
+	)
 
 	return nil
 }

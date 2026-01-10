@@ -9,7 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/example/rockskv/pkg/common"
+	"github.com/winewei/rockskv/pkg/common"
 )
 
 // MigrationManager handles partition migration (stub implementation)

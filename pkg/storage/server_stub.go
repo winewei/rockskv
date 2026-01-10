@@ -14,10 +14,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 
-	"github.com/example/rockskv/pkg/common"
-	pb "github.com/example/rockskv/pkg/proto"
+	"github.com/winewei/rockskv/pkg/common"
+	pb "github.com/winewei/rockskv/pkg/proto"
 )
 
 // ServerConfig holds storage server configuration
@@ -93,6 +94,17 @@ func (s *Server) Start() error {
 	}
 
 	s.grpcServer = grpc.NewServer(
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             5 * time.Second,  // Allow pings every 5 seconds
+			PermitWithoutStream: true,             // Allow pings even without active streams
+		}),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			MaxConnectionIdle:     15 * time.Minute, // Close idle connections after 15 minutes
+			MaxConnectionAge:      30 * time.Minute, // Maximum connection age
+			MaxConnectionAgeGrace: 5 * time.Second,  // Grace period for pending RPCs
+			Time:                  10 * time.Second, // Ping interval when no activity
+			Timeout:               3 * time.Second,  // Ping timeout
+		}),
 		grpc.UnaryInterceptor(s.unaryInterceptor),
 		grpc.StreamInterceptor(s.streamInterceptor),
 	)
@@ -124,6 +136,9 @@ func (s *Server) registerWithMetadata() {
 		}
 		break
 	}
+
+	// Subscribe to route table updates
+	go s.subscribeRouteUpdates()
 
 	// Start heartbeat loop
 	s.heartbeatLoop()
@@ -190,6 +205,100 @@ func (s *Server) heartbeatLoop() {
 		if err != nil {
 			s.logger.Warn("Heartbeat failed", zap.Error(err))
 		}
+	}
+}
+
+// subscribeRouteUpdates subscribes to route table updates from metadata service
+func (s *Server) subscribeRouteUpdates() {
+	// Get public address for matching
+	addr := s.config.ListenAddr
+	if addr[0] == ':' {
+		addr = "localhost" + addr
+	}
+
+	for {
+		if s.metadataClient == nil {
+			time.Sleep(time.Second)
+			continue
+		}
+
+		stream, err := s.metadataClient.SubscribeRouteUpdates(context.Background(), &pb.SubscribeRequest{
+			NodeId: s.config.NodeID,
+		})
+		if err != nil {
+			s.logger.Warn("Failed to subscribe to route updates", zap.Error(err))
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		for {
+			update, err := stream.Recv()
+			if err != nil {
+				s.logger.Warn("Route subscription stream error", zap.Error(err))
+				break
+			}
+
+			// Update partitions based on route table
+			s.updatePartitionsFromRoute(update.Partitions, addr)
+		}
+	}
+}
+
+// updatePartitionsFromRoute updates local partitions based on route table
+func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAddr string) {
+	// Track which partitions should exist on this node
+	shouldExist := make(map[uint32]bool)
+	addedCount := 0
+	removedCount := 0
+
+	for _, p := range partitions {
+		isPrimary := p.Primary == myAddr
+		isReplica := p.Replica == myAddr
+
+		if isPrimary || isReplica {
+			shouldExist[p.PartitionId] = true
+
+			if !s.partitionManager.HasPartition(p.PartitionId) {
+				if err := s.partitionManager.AddPartition(p.PartitionId, isPrimary); err != nil {
+					s.logger.Warn("Failed to add partition",
+						zap.Uint32("partition_id", p.PartitionId),
+						zap.Error(err),
+					)
+				} else {
+					addedCount++
+					s.logger.Debug("Partition added",
+						zap.Uint32("partition_id", p.PartitionId),
+						zap.Bool("is_primary", isPrimary),
+					)
+				}
+			}
+		}
+	}
+
+	// Remove partitions that should no longer exist on this node
+	currentPartitions := s.partitionManager.ListPartitions()
+	for _, partitionID := range currentPartitions {
+		if !shouldExist[partitionID] {
+			if err := s.partitionManager.RemovePartition(partitionID); err != nil {
+				s.logger.Warn("Failed to remove partition",
+					zap.Uint32("partition_id", partitionID),
+					zap.Error(err),
+				)
+			} else {
+				removedCount++
+				s.logger.Info("Partition removed from node",
+					zap.Uint32("partition_id", partitionID),
+				)
+			}
+		}
+	}
+
+	if addedCount > 0 || removedCount > 0 {
+		s.logger.Info("Partitions updated from route table",
+			zap.Int("added", addedCount),
+			zap.Int("removed", removedCount),
+			zap.Int("total", s.partitionManager.PartitionCount()),
+		)
 	}
 }
 
@@ -406,14 +515,123 @@ func (s *Server) BatchPut(ctx context.Context, req *pb.StorageBatchPutRequest) (
 	}, nil
 }
 
-// ExportSST implements StorageService.ExportSST (stub)
+// ExportSST implements StorageService.ExportSST
 func (s *Server) ExportSST(req *pb.ExportSSTRequest, stream pb.StorageService_ExportSSTServer) error {
-	return status.Errorf(codes.Unimplemented, "SST export not supported in stub implementation")
+	partitionID := req.PartitionId
+	bandwidthLimit := req.BandwidthLimit
+
+	s.logger.Info("Starting SST export",
+		zap.Uint32("partition_id", partitionID),
+		zap.Int64("bandwidth_limit", bandwidthLimit),
+	)
+
+	// Get all data for this partition
+	data, err := s.partitionManager.ExportPartitionData(partitionID)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to export partition data: %v", err)
+	}
+
+	totalSize := int64(len(data))
+	chunkSize := 4 * 1024 * 1024 // 4MB chunks
+	offset := int64(0)
+
+	// Calculate sleep duration for bandwidth limiting
+	var sleepDuration time.Duration
+	if bandwidthLimit > 0 {
+		// Sleep time per chunk to achieve target bandwidth
+		sleepDuration = time.Duration(float64(chunkSize) / float64(bandwidthLimit) * float64(time.Second))
+	}
+
+	for offset < totalSize {
+		end := offset + int64(chunkSize)
+		if end > totalSize {
+			end = totalSize
+		}
+
+		chunk := &pb.SSTChunk{
+			Data:        data[offset:end],
+			Filename:    fmt.Sprintf("partition_%d.json", partitionID),
+			IsLast:      end >= totalSize,
+			PartitionId: partitionID,
+			TotalSize:   totalSize,
+			Offset:      offset,
+		}
+
+		if err := stream.Send(chunk); err != nil {
+			return status.Errorf(codes.Internal, "failed to send chunk: %v", err)
+		}
+
+		offset = end
+
+		// Apply bandwidth limiting
+		if sleepDuration > 0 && offset < totalSize {
+			time.Sleep(sleepDuration)
+		}
+	}
+
+	s.logger.Info("SST export completed",
+		zap.Uint32("partition_id", partitionID),
+		zap.Int64("total_bytes", totalSize),
+	)
+
+	return nil
 }
 
-// IngestSST implements StorageService.IngestSST (stub)
+// IngestSST implements StorageService.IngestSST
 func (s *Server) IngestSST(stream pb.StorageService_IngestSSTServer) error {
-	return status.Errorf(codes.Unimplemented, "SST ingest not supported in stub implementation")
+	var allData []byte
+	var partitionID uint32
+	var totalBytes int64
+
+	for {
+		chunk, err := stream.Recv()
+		if err != nil {
+			break
+		}
+
+		if partitionID == 0 {
+			partitionID = chunk.PartitionId
+		}
+
+		allData = append(allData, chunk.Data...)
+		totalBytes += int64(len(chunk.Data))
+
+		if chunk.IsLast {
+			break
+		}
+	}
+
+	if len(allData) == 0 {
+		return stream.SendAndClose(&pb.IngestSSTResponse{
+			Success:       true,
+			KeysIngested:  0,
+			BytesIngested: 0,
+		})
+	}
+
+	// Import the data
+	keysIngested, err := s.partitionManager.ImportPartitionData(partitionID, allData)
+	if err != nil {
+		s.logger.Error("Failed to ingest SST data",
+			zap.Uint32("partition_id", partitionID),
+			zap.Error(err),
+		)
+		return stream.SendAndClose(&pb.IngestSSTResponse{
+			Success: false,
+		})
+	}
+
+	s.logger.Info("SST ingest completed",
+		zap.Uint32("partition_id", partitionID),
+		zap.Int64("keys", keysIngested),
+		zap.Int64("bytes", totalBytes),
+	)
+
+	return stream.SendAndClose(&pb.IngestSSTResponse{
+		Success:       true,
+		KeysIngested:  keysIngested,
+		BytesIngested: totalBytes,
+	})
 }
 
 // GetPartitionManager returns the partition manager

@@ -27,6 +27,11 @@ service MetadataService {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
   rpc GetRouteTable(GetRouteTableRequest) returns (GetRouteTableResponse);
   rpc SubscribeRouteUpdates(SubscribeRequest) returns (stream RouteUpdate);
+
+  // Migration APIs
+  rpc TriggerRebalance(TriggerRebalanceRequest) returns (TriggerRebalanceResponse);
+  rpc GetMigrationStatus(GetMigrationStatusRequest) returns (GetMigrationStatusResponse);
+  rpc CancelMigration(CancelMigrationRequest) returns (CancelMigrationResponse);
 }
 
 // ========== KVService 消息定义 ==========
@@ -127,17 +132,22 @@ message StorageBatchPutResponse {
 
 message ExportSSTRequest {
   uint32 partition_id = 1;
+  int64 bandwidth_limit = 2;  // Bytes per second, 0 for unlimited
 }
 
 message SSTChunk {
   bytes data = 1;
   string filename = 2;
   bool is_last = 3;
+  uint32 partition_id = 4;
+  int64 total_size = 5;       // Total size of this partition's data
+  int64 offset = 6;           // Current offset for progress tracking
 }
 
 message IngestSSTResponse {
   bool success = 1;
   int64 keys_ingested = 2;
+  int64 bytes_ingested = 3;
 }
 
 // ========== 错误码 ==========
@@ -198,6 +208,9 @@ message PartitionInfo {
   string primary = 2;
   string replica = 3;
   PartitionStatus status = 4;
+  // Migration fields
+  string migration_target = 5;  // Target node during migration
+  MigrationState migration_state = 6;
 }
 
 // ========== 枚举类型 ==========
@@ -213,4 +226,67 @@ enum PartitionStatus {
   MIGRATING_OUT = 1;
   MIGRATING_IN = 2;
   OFFLINE = 3;
+}
+
+enum MigrationState {
+  MIGRATION_NONE = 0;
+  MIGRATION_PREPARING = 1;    // Creating snapshot
+  MIGRATION_COPYING = 2;      // Transferring SST data
+  MIGRATION_CATCHUP = 3;      // Catching up incremental writes
+  MIGRATION_SWITCHING = 4;    // Switching route
+  MIGRATION_COMPLETE = 5;     // Migration done
+  MIGRATION_FAILED = 6;       // Migration failed
+}
+
+// ========== Migration 消息定义 ==========
+
+message TriggerRebalanceRequest {
+  bool force = 1;  // Force rebalance even if already balanced
+  int64 bandwidth_limit = 2;  // Bytes per second, 0 for default
+  int32 max_concurrent = 3;   // Max concurrent partition migrations, 0 for default
+}
+
+message TriggerRebalanceResponse {
+  bool success = 1;
+  string message = 2;
+  string migration_id = 3;
+  int32 partitions_to_migrate = 4;
+}
+
+message GetMigrationStatusRequest {
+  string migration_id = 1;  // Empty for current migration
+}
+
+message GetMigrationStatusResponse {
+  bool in_progress = 1;
+  string migration_id = 2;
+  int64 start_time = 3;
+  int32 total_partitions = 4;
+  int32 completed_partitions = 5;
+  int32 failed_partitions = 6;
+  int64 bytes_copied = 7;
+  int64 bytes_total = 8;
+  double progress_percent = 9;
+  int64 estimated_remaining_seconds = 10;
+  repeated PartitionMigrationStatus partition_status = 11;
+}
+
+message PartitionMigrationStatus {
+  uint32 partition_id = 1;
+  string source_node = 2;
+  string target_node = 3;
+  MigrationState state = 4;
+  int64 bytes_copied = 5;
+  int64 bytes_total = 6;
+  double progress_percent = 7;
+  string error_message = 8;
+}
+
+message CancelMigrationRequest {
+  string migration_id = 1;
+}
+
+message CancelMigrationResponse {
+  bool success = 1;
+  string message = 2;
 }

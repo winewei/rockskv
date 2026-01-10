@@ -13,8 +13,8 @@ import (
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 
-	"github.com/example/rockskv/pkg/common"
-	"github.com/example/rockskv/pkg/compute"
+	"github.com/winewei/rockskv/pkg/common"
+	"github.com/winewei/rockskv/pkg/compute"
 )
 
 func main() {
@@ -46,7 +46,10 @@ func main() {
 	// Start metrics server
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
-		metricsAddr := ":8090"
+		metricsAddr := viper.GetString("metrics_addr")
+		if metricsAddr == "" {
+			metricsAddr = ":8090"
+		}
 		logger.Info("Starting metrics server", zap.String("addr", metricsAddr))
 		if err := http.ListenAndServe(metricsAddr, nil); err != nil {
 			logger.Error("Metrics server failed", zap.Error(err))

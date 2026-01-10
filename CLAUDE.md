@@ -1,142 +1,141 @@
-# CLAUDE.md - RocksKV 开发指南
+# CLAUDE.md
 
-## 项目简介
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-RocksKV 是一个基于 RocksDB 的存算分离分布式 KV 数据库，作为 DynamoDB 的低成本替代方案。
+## Project Overview
 
-## 架构概览
+RocksKV is a compute-storage separated distributed KV database built on RocksDB, designed as a low-cost alternative to DynamoDB.
 
-```
-Client → Compute Layer → Storage Layer → RocksDB + NVMe
-              ↓
-         Metadata Service (etcd)
-```
-
-- **Compute Layer**: 无状态路由层，负责请求路由、双副本写入协调
-- **Storage Layer**: 有状态存储层，基于 RocksDB，WAL 存 EBS，SST 存 NVMe
-- **Metadata Service**: 路由表管理、节点注册、故障检测
-
-## 技术栈
-
-- 语言: Go 1.21+
-- 存储引擎: RocksDB (grocksdb)
-- RPC: gRPC + Protobuf
-- 元数据: etcd
-- 日志: zap
-- 配置: viper
-- 监控: prometheus
-
-## 目录结构
+## Architecture
 
 ```
-rockskv/
-├── cmd/
-│   ├── compute/main.go      # Compute 服务入口
-│   ├── storage/main.go      # Storage 服务入口
-│   ├── metadata/main.go     # Metadata 服务入口
-│   └── cli/main.go          # CLI 客户端
-├── proto/
-│   └── rockskv.proto        # Protobuf 定义
-├── pkg/
-│   ├── compute/             # Compute 层实现
-│   │   ├── router.go        # 路由模块
-│   │   ├── pool.go          # 连接池
-│   │   └── server.go        # gRPC 服务
-│   ├── storage/             # Storage 层实现
-│   │   ├── rocksdb.go       # RocksDB 封装
-│   │   ├── partition.go     # 分区管理
-│   │   ├── server.go        # gRPC 服务
-│   │   └── migration.go     # SST 迁移
-│   ├── metadata/            # Metadata 服务实现
-│   │   ├── store.go         # 存储接口
-│   │   ├── etcd.go          # etcd 实现
-│   │   ├── router.go        # 路由管理
-│   │   ├── server.go        # gRPC 服务
-│   │   └── failover.go      # 故障切换
-│   ├── client/              # 客户端 SDK
-│   │   └── client.go
-│   └── common/              # 公共组件
-│       ├── logger.go
-│       └── metrics.go
-├── config/                  # 配置文件
-│   ├── storage.yaml
-│   ├── compute.yaml
-│   └── metadata.yaml
-└── Makefile
+                    ┌─────────────┐
+                    │   Client    │
+                    └──────┬──────┘
+                           │
+              ┌────────────┴────────────┐
+              ▼                         ▼
+       ┌────────────┐            ┌────────────┐
+       │ Compute-1  │            │ Compute-2  │
+       │  (:8000)   │            │  (:8001)   │
+       └─────┬──────┘            └──────┬─────┘
+             │                          │
+             └────────────┬─────────────┘
+                          │
+         ┌────────────────┼────────────────┐
+         ▼                ▼                ▼
+  ┌────────────┐   ┌────────────┐   ┌────────────┐
+  │ Storage-1  │   │ Storage-2  │   │  Metadata  │
+  │  (:9001)   │   │  (:9002)   │   │  (:9000)   │
+  └─────┬──────┘   └─────┬──────┘   └──────┬─────┘
+        │                │                 │
+        ▼                ▼                 ▼
+     RocksDB          RocksDB            etcd
 ```
 
-## 核心设计
+**Three-tier architecture:**
+- **Compute Layer** (`pkg/compute/`): Stateless routing layer. Routes requests using xxhash, coordinates dual-replica sync writes. Horizontally scalable.
+- **Storage Layer** (`pkg/storage/`): Stateful storage layer. RocksDB with WAL on EBS, data on NVMe. Subscribes to route table for partition assignment.
+- **Metadata Service** (`pkg/metadata/`): Route table management, node registration, failover detection (backed by etcd)
 
-### 分区策略
-- 固定 4096 个分区
-- 路由: `partition_id = xxhash(key) % 4096`
-- 每个分区有 Primary 和 Replica 两个副本
+**Key design decisions:**
+- Fixed 4096 partitions: `partition_id = xxhash(key) % 4096`
+- Each partition has Primary + Replica (dual-replica sync write - both must succeed)
+- Partition keys in RocksDB: `p:<partition_id_4bytes>:<key>`
+- All gRPC calls use 5s timeout
+- Storage nodes subscribe to metadata for route table updates
 
-### 双副本同步写入
-Compute 层并行写入 Primary 和 Replica，两边都成功才返回成功。
-
-### RocksDB WAL 分离
-WAL 写入 EBS（持久），数据存 NVMe（高性能）。
-
-### SST Ingest 快速迁移
-通过导出和加载 SST 文件实现分区快速迁移。
-
-## 常用命令
+## Build Commands
 
 ```bash
-# 生成 protobuf (需要 protoc)
-make proto
-
-# 构建所有服务
-make build
-
-# 构建特定服务
-make build-storage
-make build-compute
-make build-metadata
-make build-cli
-
-# 运行测试
-make test
-
-# 运行特定测试
-make test-storage
-make test-compute
-
-# 清理
-make clean
+make build              # Build all services for current platform
+make build-storage      # Build only storage service
+make build-compute      # Build only compute service
+make build-metadata     # Build only metadata service
+make build-cli          # Build only CLI client
+make build-darwin-arm64 # Cross-compile for Apple Silicon
+make build-linux-amd64  # Cross-compile for Linux x86_64
 ```
 
-## 运行服务
+## Test Commands
 
 ```bash
-# 启动 metadata 服务 (需要先启动 etcd)
-./bin/rockskv-metadata -c config/metadata.yaml
+make test               # Run all tests with race detection and coverage
+make test-storage       # Test only pkg/storage/
+make test-compute       # Test only pkg/compute/
+make test-metadata      # Test only pkg/metadata/
 
-# 启动 storage 服务
-./bin/rockskv-storage -c config/storage.yaml
+# Run a single test
+go test -v -race ./pkg/compute/... -run TestCalculatePartition
 
-# 启动 compute 服务
-./bin/rockskv-compute -c config/compute.yaml
-
-# 使用 CLI
-./bin/rockskv-cli put foo bar
-./bin/rockskv-cli get foo
+# Run smoke tests (requires running services)
+./scripts/smoke-test.sh
 ```
 
-## 性能目标
+## Code Generation
 
-| 指标 | 目标 |
-|------|------|
-| 读 P99 | < 10ms |
-| 写 P99 | < 15ms |
-| 单节点读 QPS | > 10,000 |
-| 单节点写 QPS | > 15,000 |
+```bash
+make proto              # Regenerate protobuf code (requires protoc)
+```
 
-## 注意事项
+Proto definitions are in `proto/rockskv.proto`, generated Go code goes to `pkg/proto/`.
 
-1. 所有 gRPC 调用设置 5s 超时
-2. 连接池复用连接，避免频繁创建
-3. RocksDB 配置 Block Cache 为内存的 60%
-4. Compaction 线程数限制为 CPU 核数的一半
-5. 优雅关闭：先停止接收新请求，等待进行中请求完成，再关闭
+## Running Locally
+
+```bash
+# Start etcd first (via Docker)
+docker-compose up -d etcd
+
+# Start all services
+./scripts/start-all.sh
+
+# Check status
+./scripts/status.sh
+
+# Stop all services
+./scripts/stop-all.sh
+```
+
+**Service ports:**
+
+| Service | Port | Metrics Port |
+|---------|------|--------------|
+| etcd | 2379 | - |
+| Metadata | 9000 | 9090 |
+| Storage-1 | 9001 | 9091 |
+| Storage-2 | 9002 | 9092 |
+| Compute-1 | 8000 | 8090 |
+| Compute-2 | 8001 | 8091 |
+
+## CLI Usage
+
+```bash
+# Basic operations (default: localhost:8000)
+./bin/darwin-arm64/rockskv-cli put key value
+./bin/darwin-arm64/rockskv-cli get key
+./bin/darwin-arm64/rockskv-cli delete key
+
+# Connect to specific compute node
+./bin/darwin-arm64/rockskv-cli -addr localhost:8001 get key
+
+# Batch operations
+./bin/darwin-arm64/rockskv-cli mset k1 v1 k2 v2
+./bin/darwin-arm64/rockskv-cli mget k1 k2
+```
+
+## Code Patterns
+
+- Logging: Use `common.NewLogger("component-name")` (zap-based, outputs to stderr)
+- Metrics: Use `common.RequestCounter`, `common.RequestLatency`, etc. (prometheus)
+- Configuration: viper-based YAML configs in `config/local/`
+- gRPC services implement generated interfaces from `pkg/proto/`
+- Storage has stub files (`*_stub.go`) for CGO-free builds
+
+## Adding New Nodes
+
+To add a new compute or storage node:
+
+1. Create config file in `config/local/` (copy existing and modify node_id, ports)
+2. Create start script in `scripts/` (copy existing and update config path)
+3. Update `scripts/start-all.sh`, `scripts/stop-all.sh`, `scripts/status.sh`
+4. Rebuild and restart: `make build-darwin-arm64 && ./scripts/start-all.sh`
