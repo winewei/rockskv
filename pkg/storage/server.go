@@ -63,6 +63,10 @@ type Server struct {
 	leaseMu         sync.RWMutex
 	leaseCtx        context.Context
 	leaseCancel     context.CancelFunc
+
+	// Replication: maps partition ID to replicator
+	replicators   map[uint32]*PartitionReplicator
+	replicatorsMu sync.RWMutex
 }
 
 // NewServer creates a new storage server
@@ -98,6 +102,7 @@ func NewServer(config *ServerConfig) (*Server, error) {
 		partitionLeases:  make(map[uint32]int64),
 		leaseCtx:         leaseCtx,
 		leaseCancel:      leaseCancel,
+		replicators:      make(map[uint32]*PartitionReplicator),
 	}
 
 	return server, nil
@@ -313,6 +318,9 @@ func (s *Server) Put(ctx context.Context, req *pb.StoragePutRequest) (*pb.Storag
 		}, nil
 	}
 
+	// Enqueue for async replication (if Primary)
+	s.enqueueReplication(req.PartitionId, req.Key, req.Value, false)
+
 	common.StorageOperations.WithLabelValues("put", "success").Inc()
 	return &pb.StoragePutResponse{
 		Success: true,
@@ -347,6 +355,9 @@ func (s *Server) Delete(ctx context.Context, req *pb.StorageDeleteRequest) (*pb.
 			Error:   pb.ErrorCode_INTERNAL_ERROR,
 		}, nil
 	}
+
+	// Enqueue for async replication (if Primary)
+	s.enqueueReplication(req.PartitionId, req.Key, nil, true)
 
 	common.StorageOperations.WithLabelValues("delete", "success").Inc()
 	return &pb.StorageDeleteResponse{
@@ -772,6 +783,7 @@ func (s *Server) subscribeRouteUpdates() {
 func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAddr string) {
 	shouldExist := make(map[uint32]bool)
 	primaryPartitions := make(map[uint32]bool)
+	partitionReplicas := make(map[uint32]string) // partition -> replica address
 	addedCount := 0
 	removedCount := 0
 
@@ -783,6 +795,7 @@ func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAdd
 			shouldExist[p.PartitionId] = true
 			if isPrimary {
 				primaryPartitions[p.PartitionId] = true
+				partitionReplicas[p.PartitionId] = p.Replica
 			}
 
 			if !s.partitionManager.HasPartition(p.PartitionId) {
@@ -796,6 +809,11 @@ func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAdd
 					// Acquire lease for new Primary partition
 					if isPrimary {
 						s.tryAcquireLease(p.PartitionId, myAddr)
+						// Initialize replicator for Primary partition
+						s.initializeReplicator(p.PartitionId, true, p.Replica)
+					} else {
+						// Initialize replicator for Replica partition (receives data)
+						s.initializeReplicator(p.PartitionId, false, "")
 					}
 				}
 			}
@@ -816,6 +834,9 @@ func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAdd
 	currentPartitions := s.partitionManager.ListPartitions()
 	for _, partitionID := range currentPartitions {
 		if !shouldExist[partitionID] {
+			// Stop replicator before removing partition
+			s.stopReplicator(partitionID)
+
 			if err := s.partitionManager.RemovePartition(partitionID); err != nil {
 				s.logger.Warn("Failed to remove partition",
 					zap.Uint32("partition_id", partitionID),
@@ -930,5 +951,127 @@ func (s *Server) renewAllLeases() {
 			delete(s.partitionLeases, partitionID)
 			s.leaseMu.Unlock()
 		}
+	}
+}
+
+// enqueueReplication adds an entry to the replication queue for the partition
+func (s *Server) enqueueReplication(partitionID uint32, key, value []byte, isDelete bool) {
+	s.replicatorsMu.RLock()
+	replicator, exists := s.replicators[partitionID]
+	s.replicatorsMu.RUnlock()
+
+	if !exists || replicator == nil {
+		return
+	}
+
+	entry := &ReplicationEntry{
+		Key:      key,
+		Value:    value,
+		IsDelete: isDelete,
+	}
+	replicator.Enqueue(entry)
+}
+
+// Replicate implements StorageService.Replicate (called on Replica by Primary)
+func (s *Server) Replicate(ctx context.Context, req *pb.ReplicateRequest) (*pb.ReplicateResponse, error) {
+	// Check if we have the partition
+	if !s.partitionManager.HasPartition(req.PartitionId) {
+		return &pb.ReplicateResponse{
+			Success:      false,
+			ErrorMessage: "partition not found",
+		}, nil
+	}
+
+	// Apply all entries
+	var lastApplied int64
+	for _, entry := range req.Entries {
+		if entry.IsDelete {
+			if err := s.partitionManager.Delete(entry.Key, req.PartitionId); err != nil {
+				return &pb.ReplicateResponse{
+					Success:           false,
+					LastAppliedOffset: lastApplied,
+					ErrorMessage:      err.Error(),
+				}, nil
+			}
+		} else {
+			if err := s.partitionManager.Put(entry.Key, entry.Value, req.PartitionId); err != nil {
+				return &pb.ReplicateResponse{
+					Success:           false,
+					LastAppliedOffset: lastApplied,
+					ErrorMessage:      err.Error(),
+				}, nil
+			}
+		}
+		lastApplied = entry.Offset
+	}
+
+	// Update replicator offset if exists
+	s.replicatorsMu.RLock()
+	replicator, exists := s.replicators[req.PartitionId]
+	s.replicatorsMu.RUnlock()
+
+	if exists && replicator != nil {
+		replicator.CommitOffset(req.CommitOffset)
+	}
+
+	return &pb.ReplicateResponse{
+		Success:           true,
+		LastAppliedOffset: lastApplied,
+	}, nil
+}
+
+// GetReplicationStatus implements StorageService.GetReplicationStatus
+func (s *Server) GetReplicationStatus(ctx context.Context, req *pb.GetReplicationStatusRequest) (*pb.GetReplicationStatusResponse, error) {
+	s.replicatorsMu.RLock()
+	replicator, exists := s.replicators[req.PartitionId]
+	s.replicatorsMu.RUnlock()
+
+	if !exists || replicator == nil {
+		return &pb.GetReplicationStatusResponse{
+			PartitionId: req.PartitionId,
+			IsPrimary:   false,
+		}, nil
+	}
+
+	return &pb.GetReplicationStatusResponse{
+		PartitionId:     req.PartitionId,
+		IsPrimary:       replicator.isPrimary,
+		CurrentOffset:   replicator.GetCurrentOffset(),
+		CommittedOffset: replicator.GetCommittedOffset(),
+		ReplicationLag:  replicator.GetReplicationLag(),
+		ReplicaAddr:     replicator.replicaAddr,
+	}, nil
+}
+
+// initializeReplicator creates a replicator for a partition
+func (s *Server) initializeReplicator(partitionID uint32, isPrimary bool, replicaAddr string) {
+	s.replicatorsMu.Lock()
+	defer s.replicatorsMu.Unlock()
+
+	// Stop existing replicator if any
+	if existing, ok := s.replicators[partitionID]; ok {
+		existing.Stop()
+	}
+
+	replicator := NewPartitionReplicator(partitionID, isPrimary, replicaAddr)
+	if err := replicator.Start(); err != nil {
+		s.logger.Warn("Failed to start replicator",
+			zap.Uint32("partition_id", partitionID),
+			zap.Error(err),
+		)
+		return
+	}
+
+	s.replicators[partitionID] = replicator
+}
+
+// stopReplicator stops and removes a replicator for a partition
+func (s *Server) stopReplicator(partitionID uint32) {
+	s.replicatorsMu.Lock()
+	defer s.replicatorsMu.Unlock()
+
+	if replicator, ok := s.replicators[partitionID]; ok {
+		replicator.Stop()
+		delete(s.replicators, partitionID)
 	}
 }

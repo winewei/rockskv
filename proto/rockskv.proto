@@ -19,6 +19,10 @@ service StorageService {
   rpc BatchPut(StorageBatchPutRequest) returns (StorageBatchPutResponse);
   rpc ExportSST(ExportSSTRequest) returns (stream SSTChunk);
   rpc IngestSST(stream SSTChunk) returns (IngestSSTResponse);
+
+  // Replication APIs (Primary -> Replica)
+  rpc Replicate(ReplicateRequest) returns (ReplicateResponse);
+  rpc GetReplicationStatus(GetReplicationStatusRequest) returns (GetReplicationStatusResponse);
 }
 
 // MetadataService - 元数据服务
@@ -354,4 +358,41 @@ message RevokeLeaseRequest {
 
 message RevokeLeaseResponse {
   bool success = 1;
+}
+
+// ========== Replication 消息定义 ==========
+
+// ReplicateRequest is sent from Primary to Replica for async replication
+message ReplicateRequest {
+  uint32 partition_id = 1;
+  repeated ReplicationEntry entries = 2;
+  int64 commit_offset = 3;  // Offset to commit up to
+}
+
+// ReplicationEntry represents a single write operation to replicate
+message ReplicationEntry {
+  int64 offset = 1;         // Unique offset for this entry
+  bytes key = 2;
+  bytes value = 3;          // Empty for delete operations
+  bool is_delete = 4;
+  int64 timestamp = 5;      // Write timestamp in nanoseconds
+}
+
+message ReplicateResponse {
+  bool success = 1;
+  int64 last_applied_offset = 2;  // Last offset successfully applied
+  string error_message = 3;
+}
+
+message GetReplicationStatusRequest {
+  uint32 partition_id = 1;
+}
+
+message GetReplicationStatusResponse {
+  uint32 partition_id = 1;
+  bool is_primary = 2;
+  int64 current_offset = 3;       // Latest offset (Primary: written, Replica: received)
+  int64 committed_offset = 4;     // Offset confirmed persisted
+  int64 replication_lag = 5;      // Lag in number of entries (Primary only)
+  string replica_addr = 6;        // Address of replica (Primary only)
 }

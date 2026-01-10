@@ -3,7 +3,6 @@ package metadata
 import (
 	"context"
 	"fmt"
-	"sort"
 	"sync"
 	"time"
 
@@ -25,6 +24,7 @@ const (
 type Router struct {
 	store       Store
 	routeTable  *RouteTable
+	hashRing    *ConsistentHash
 	mu          sync.RWMutex
 	subscribers map[string]chan *RouteTable
 	subMu       sync.RWMutex
@@ -36,6 +36,7 @@ func NewRouter(store Store) *Router {
 	return &Router{
 		store:       store,
 		routeTable:  NewRouteTable(),
+		hashRing:    NewConsistentHash(DefaultVirtualNodes),
 		subscribers: make(map[string]chan *RouteTable),
 		logger:      common.NewLogger("router"),
 	}
@@ -210,30 +211,41 @@ func (r *Router) InitCluster(ctx context.Context) error {
 	return nil
 }
 
-// allocatePartitions distributes partitions across storage nodes
+// allocatePartitions distributes partitions across storage nodes using consistent hashing
 func (r *Router) allocatePartitions(ctx context.Context, nodes []*NodeInfo) error {
-	// Sort nodes by ID for consistent assignment
-	sort.Slice(nodes, func(i, j int) bool {
-		return nodes[i].ID < nodes[j].ID
-	})
+	// Build consistent hash ring with all nodes
+	hashRing := NewConsistentHash(DefaultVirtualNodes)
+	for _, node := range nodes {
+		hashRing.AddNode(node.Addr)
+	}
 
-	nodeCount := len(nodes)
+	// Store the hash ring for future use
+	r.mu.Lock()
+	r.hashRing = hashRing
+	r.mu.Unlock()
+
 	table := NewRouteTable()
 
-	// Distribute partitions across nodes
+	// Distribute partitions using consistent hashing
 	for i := uint32(0); i < TotalPartitions; i++ {
-		primaryIdx := int(i) % nodeCount
-		replicaIdx := (primaryIdx + 1) % nodeCount
+		primary, replica := hashRing.GetNodes(i)
 
 		table.Partitions[i] = &PartitionInfo{
 			ID:      i,
-			Primary: nodes[primaryIdx].Addr,
-			Replica: nodes[replicaIdx].Addr,
+			Primary: primary,
+			Replica: replica,
 			Status:  PartitionStatusNormal,
 		}
 	}
 
 	table.UpdatedAt = time.Now()
+
+	// Log distribution statistics
+	distribution := hashRing.GetPartitionDistribution(TotalPartitions)
+	r.logger.Info("Partition distribution (consistent hashing)",
+		zap.Int("node_count", len(nodes)),
+		zap.Any("distribution", distribution),
+	)
 
 	// Save route table
 	if err := r.store.UpdateRouteTable(ctx, table); err != nil {
@@ -256,69 +268,38 @@ func (r *Router) InitializePartitions(ctx context.Context) error {
 		return fmt.Errorf("need at least %d storage nodes, got %d", MinReplicaNodes, len(nodes))
 	}
 
-	// Sort nodes by ID for consistent assignment
-	sort.Slice(nodes, func(i, j int) bool {
-		return nodes[i].ID < nodes[j].ID
-	})
-
-	nodeCount := len(nodes)
-	table := NewRouteTable()
-
-	// Distribute partitions across nodes
-	for i := uint32(0); i < TotalPartitions; i++ {
-		primaryIdx := int(i) % nodeCount
-		replicaIdx := (primaryIdx + 1) % nodeCount
-
-		table.Partitions[i] = &PartitionInfo{
-			ID:      i,
-			Primary: nodes[primaryIdx].Addr,
-			Replica: nodes[replicaIdx].Addr,
-			Status:  PartitionStatusNormal,
-		}
-	}
-
-	table.UpdatedAt = time.Now()
-
-	// Save route table
-	if err := r.store.UpdateRouteTable(ctx, table); err != nil {
-		return fmt.Errorf("failed to save route table: %w", err)
-	}
-
-	r.updateRouteTable(table)
-
-	r.logger.Info("Partitions initialized",
-		zap.Int("partition_count", TotalPartitions),
-		zap.Int("node_count", nodeCount),
-	)
-
-	return nil
+	// Use consistent hashing for partition allocation
+	return r.allocatePartitions(ctx, nodes)
 }
 
-// RebalancePartitions rebalances partitions after node changes
+// RebalancePartitions rebalances partitions after node changes using consistent hashing
 func (r *Router) RebalancePartitions(ctx context.Context) error {
 	nodes, err := r.store.ListNodes(ctx, NodeRoleStorage)
 	if err != nil {
 		return fmt.Errorf("failed to list storage nodes: %w", err)
 	}
 
-	if len(nodes) < MinReplicaNodes {
-		return fmt.Errorf("need at least %d storage nodes, got %d", MinReplicaNodes, len(nodes))
+	// Filter only online nodes
+	onlineNodes := make([]*NodeInfo, 0, len(nodes))
+	for _, node := range nodes {
+		if node.Status == string(NodeStatusOnline) || node.Status == "online" {
+			onlineNodes = append(onlineNodes, node)
+		}
 	}
 
-	// Sort nodes by ID for consistent assignment
-	sort.Slice(nodes, func(i, j int) bool {
-		return nodes[i].ID < nodes[j].ID
-	})
+	if len(onlineNodes) < MinReplicaNodes {
+		return fmt.Errorf("need at least %d online storage nodes, got %d", MinReplicaNodes, len(onlineNodes))
+	}
+
+	// Build new consistent hash ring
+	newHashRing := NewConsistentHash(DefaultVirtualNodes)
+	for _, node := range onlineNodes {
+		newHashRing.AddNode(node.Addr)
+	}
 
 	r.mu.Lock()
 	currentTable := r.routeTable
 	r.mu.Unlock()
-
-	// Create node address set for quick lookup
-	addrSet := make(map[string]bool)
-	for _, node := range nodes {
-		addrSet[node.Addr] = true
-	}
 
 	newTable := &RouteTable{
 		Version:    currentTable.Version,
@@ -326,51 +307,56 @@ func (r *Router) RebalancePartitions(ctx context.Context) error {
 		UpdatedAt:  time.Now(),
 	}
 
-	nodeCount := len(nodes)
-	changes := 0
+	primaryChanges := 0
+	replicaChanges := 0
 
 	for partitionID, partition := range currentTable.Partitions {
+		newPrimary, newReplica := newHashRing.GetNodes(partitionID)
+
 		newPartition := &PartitionInfo{
 			ID:     partition.ID,
 			Status: partition.Status,
 		}
 
-		// Check if primary is still available
-		if addrSet[partition.Primary] {
+		// Only change if necessary (minimize data movement)
+		if partition.Primary == newPrimary {
 			newPartition.Primary = partition.Primary
 		} else {
-			// Assign new primary
-			newPartition.Primary = nodes[int(partitionID)%nodeCount].Addr
-			changes++
+			newPartition.Primary = newPrimary
+			primaryChanges++
 		}
 
-		// Check if replica is still available and different from primary
-		if addrSet[partition.Replica] && partition.Replica != newPartition.Primary {
+		if partition.Replica == newReplica {
 			newPartition.Replica = partition.Replica
 		} else {
-			// Assign new replica
-			replicaIdx := (int(partitionID) + 1) % nodeCount
-			if nodes[replicaIdx].Addr == newPartition.Primary {
-				replicaIdx = (replicaIdx + 1) % nodeCount
-			}
-			newPartition.Replica = nodes[replicaIdx].Addr
-			changes++
+			newPartition.Replica = newReplica
+			replicaChanges++
 		}
 
 		newTable.Partitions[partitionID] = newPartition
 	}
 
-	if changes > 0 {
+	totalChanges := primaryChanges + replicaChanges
+	if totalChanges > 0 {
+		// Update hash ring
+		r.mu.Lock()
+		r.hashRing = newHashRing
+		r.mu.Unlock()
+
 		if err := r.store.UpdateRouteTable(ctx, newTable); err != nil {
 			return fmt.Errorf("failed to save route table: %w", err)
 		}
 
-		// Don't manually update - let etcd watch handle it to avoid duplicate notifications
-
-		r.logger.Info("Partitions rebalanced",
-			zap.Int("changes", changes),
-			zap.Int("node_count", nodeCount),
+		// Log distribution statistics
+		distribution := newHashRing.GetPartitionDistribution(TotalPartitions)
+		r.logger.Info("Partitions rebalanced (consistent hashing)",
+			zap.Int("primary_changes", primaryChanges),
+			zap.Int("replica_changes", replicaChanges),
+			zap.Int("node_count", len(onlineNodes)),
+			zap.Any("distribution", distribution),
 		)
+	} else {
+		r.logger.Info("No rebalancing needed, partition distribution is optimal")
 	}
 
 	return nil

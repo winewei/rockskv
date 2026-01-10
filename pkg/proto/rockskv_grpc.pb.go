@@ -254,6 +254,9 @@ type StorageServiceClient interface {
 	BatchPut(ctx context.Context, in *StorageBatchPutRequest, opts ...grpc.CallOption) (*StorageBatchPutResponse, error)
 	ExportSST(ctx context.Context, in *ExportSSTRequest, opts ...grpc.CallOption) (StorageService_ExportSSTClient, error)
 	IngestSST(ctx context.Context, opts ...grpc.CallOption) (StorageService_IngestSSTClient, error)
+	// Replication APIs (Primary -> Replica)
+	Replicate(ctx context.Context, in *ReplicateRequest, opts ...grpc.CallOption) (*ReplicateResponse, error)
+	GetReplicationStatus(ctx context.Context, in *GetReplicationStatusRequest, opts ...grpc.CallOption) (*GetReplicationStatusResponse, error)
 }
 
 type storageServiceClient struct {
@@ -366,6 +369,24 @@ func (x *storageServiceIngestSSTClient) CloseAndRecv() (*IngestSSTResponse, erro
 	return m, nil
 }
 
+func (c *storageServiceClient) Replicate(ctx context.Context, in *ReplicateRequest, opts ...grpc.CallOption) (*ReplicateResponse, error) {
+	out := new(ReplicateResponse)
+	err := c.cc.Invoke(ctx, "/rockskv.StorageService/Replicate", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *storageServiceClient) GetReplicationStatus(ctx context.Context, in *GetReplicationStatusRequest, opts ...grpc.CallOption) (*GetReplicationStatusResponse, error) {
+	out := new(GetReplicationStatusResponse)
+	err := c.cc.Invoke(ctx, "/rockskv.StorageService/GetReplicationStatus", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // StorageServiceServer is the server API for StorageService service.
 // All implementations must embed UnimplementedStorageServiceServer
 // for forward compatibility
@@ -376,6 +397,9 @@ type StorageServiceServer interface {
 	BatchPut(context.Context, *StorageBatchPutRequest) (*StorageBatchPutResponse, error)
 	ExportSST(*ExportSSTRequest, StorageService_ExportSSTServer) error
 	IngestSST(StorageService_IngestSSTServer) error
+	// Replication APIs (Primary -> Replica)
+	Replicate(context.Context, *ReplicateRequest) (*ReplicateResponse, error)
+	GetReplicationStatus(context.Context, *GetReplicationStatusRequest) (*GetReplicationStatusResponse, error)
 	mustEmbedUnimplementedStorageServiceServer()
 }
 
@@ -400,6 +424,12 @@ func (UnimplementedStorageServiceServer) ExportSST(*ExportSSTRequest, StorageSer
 }
 func (UnimplementedStorageServiceServer) IngestSST(StorageService_IngestSSTServer) error {
 	return status.Errorf(codes.Unimplemented, "method IngestSST not implemented")
+}
+func (UnimplementedStorageServiceServer) Replicate(context.Context, *ReplicateRequest) (*ReplicateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Replicate not implemented")
+}
+func (UnimplementedStorageServiceServer) GetReplicationStatus(context.Context, *GetReplicationStatusRequest) (*GetReplicationStatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetReplicationStatus not implemented")
 }
 func (UnimplementedStorageServiceServer) mustEmbedUnimplementedStorageServiceServer() {}
 
@@ -533,6 +563,42 @@ func (x *storageServiceIngestSSTServer) Recv() (*SSTChunk, error) {
 	return m, nil
 }
 
+func _StorageService_Replicate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReplicateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StorageServiceServer).Replicate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/rockskv.StorageService/Replicate",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StorageServiceServer).Replicate(ctx, req.(*ReplicateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StorageService_GetReplicationStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetReplicationStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StorageServiceServer).GetReplicationStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/rockskv.StorageService/GetReplicationStatus",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StorageServiceServer).GetReplicationStatus(ctx, req.(*GetReplicationStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // StorageService_ServiceDesc is the grpc.ServiceDesc for StorageService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -555,6 +621,14 @@ var StorageService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BatchPut",
 			Handler:    _StorageService_BatchPut_Handler,
+		},
+		{
+			MethodName: "Replicate",
+			Handler:    _StorageService_Replicate_Handler,
+		},
+		{
+			MethodName: "GetReplicationStatus",
+			Handler:    _StorageService_GetReplicationStatus_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
