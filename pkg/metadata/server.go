@@ -465,3 +465,50 @@ func (s *Server) GetMigrationStatus(ctx context.Context, req *pb.GetMigrationSta
 func (s *Server) CancelMigration(ctx context.Context, req *pb.CancelMigrationRequest) (*pb.CancelMigrationResponse, error) {
 	return s.migrationController.CancelMigration(ctx, req)
 }
+
+// AcquirePartitionLease implements MetadataService.AcquirePartitionLease
+func (s *Server) AcquirePartitionLease(ctx context.Context, req *pb.AcquireLeaseRequest) (*pb.AcquireLeaseResponse, error) {
+	leaseID, err := s.store.AcquirePartitionLease(ctx, req.PartitionId, req.NodeAddr)
+	if err != nil {
+		return &pb.AcquireLeaseResponse{
+			Success: false,
+			Message: err.Error(),
+		}, nil
+	}
+
+	s.logger.Debug("Partition lease acquired",
+		zap.Uint32("partition_id", req.PartitionId),
+		zap.String("node_addr", req.NodeAddr),
+		zap.Int64("lease_id", leaseID),
+	)
+
+	return &pb.AcquireLeaseResponse{
+		Success: true,
+		LeaseId: leaseID,
+	}, nil
+}
+
+// RenewPartitionLease implements MetadataService.RenewPartitionLease
+func (s *Server) RenewPartitionLease(ctx context.Context, req *pb.RenewLeaseRequest) (*pb.RenewLeaseResponse, error) {
+	if err := s.store.RenewPartitionLease(ctx, req.LeaseId); err != nil {
+		return &pb.RenewLeaseResponse{
+			Success: false,
+			Message: err.Error(),
+		}, nil
+	}
+
+	return &pb.RenewLeaseResponse{Success: true}, nil
+}
+
+// RevokePartitionLease implements MetadataService.RevokePartitionLease
+func (s *Server) RevokePartitionLease(ctx context.Context, req *pb.RevokeLeaseRequest) (*pb.RevokeLeaseResponse, error) {
+	if err := s.store.RevokePartitionLease(ctx, req.LeaseId); err != nil {
+		s.logger.Warn("Failed to revoke partition lease",
+			zap.Int64("lease_id", req.LeaseId),
+			zap.Error(err),
+		)
+		return &pb.RevokeLeaseResponse{Success: false}, nil
+	}
+
+	return &pb.RevokeLeaseResponse{Success: true}, nil
+}

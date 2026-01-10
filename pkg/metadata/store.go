@@ -19,6 +19,7 @@ type Store interface {
 	GetNode(ctx context.Context, nodeID string) (*NodeInfo, error)
 	ListNodes(ctx context.Context, role NodeRole) ([]*NodeInfo, error)
 	UpdateNodeHeartbeat(ctx context.Context, nodeID string) error
+	UpdateNodeStatus(ctx context.Context, nodeID string, status NodeStatus) error
 
 	// Route table operations
 	GetRouteTable(ctx context.Context) (*RouteTable, error)
@@ -34,6 +35,12 @@ type Store interface {
 	SetMigrationState(ctx context.Context, partitionID uint32, state *MigrationInfo) error
 	GetMigrationState(ctx context.Context, partitionID uint32) (*MigrationInfo, error)
 	DeleteMigrationState(ctx context.Context, partitionID uint32) error
+
+	// Partition Lease operations (for split-brain prevention)
+	AcquirePartitionLease(ctx context.Context, partitionID uint32, nodeAddr string) (leaseID int64, err error)
+	RenewPartitionLease(ctx context.Context, leaseID int64) error
+	RevokePartitionLease(ctx context.Context, leaseID int64) error
+	GetPartitionLeaseHolder(ctx context.Context, partitionID uint32) (nodeAddr string, err error)
 
 	// Close closes the store
 	Close() error
@@ -63,6 +70,16 @@ const (
 	NodeRoleStorage  NodeRole = "storage"
 	NodeRoleCompute  NodeRole = "compute"
 	NodeRoleMetadata NodeRole = "metadata"
+)
+
+// NodeStatus represents the status of a node
+type NodeStatus string
+
+const (
+	NodeStatusOnline   NodeStatus = "online"   // Node is healthy and serving
+	NodeStatusOffline  NodeStatus = "offline"  // Node heartbeat timeout, failover triggered
+	NodeStatusDraining NodeStatus = "draining" // Node is preparing for shutdown
+	NodeStatusRemoved  NodeStatus = "removed"  // Node has been removed from cluster
 )
 
 // NodeInfo contains information about a node

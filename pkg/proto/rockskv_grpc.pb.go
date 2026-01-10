@@ -587,6 +587,10 @@ type MetadataServiceClient interface {
 	TriggerRebalance(ctx context.Context, in *TriggerRebalanceRequest, opts ...grpc.CallOption) (*TriggerRebalanceResponse, error)
 	GetMigrationStatus(ctx context.Context, in *GetMigrationStatusRequest, opts ...grpc.CallOption) (*GetMigrationStatusResponse, error)
 	CancelMigration(ctx context.Context, in *CancelMigrationRequest, opts ...grpc.CallOption) (*CancelMigrationResponse, error)
+	// Partition Lease APIs (for split-brain prevention)
+	AcquirePartitionLease(ctx context.Context, in *AcquireLeaseRequest, opts ...grpc.CallOption) (*AcquireLeaseResponse, error)
+	RenewPartitionLease(ctx context.Context, in *RenewLeaseRequest, opts ...grpc.CallOption) (*RenewLeaseResponse, error)
+	RevokePartitionLease(ctx context.Context, in *RevokeLeaseRequest, opts ...grpc.CallOption) (*RevokeLeaseResponse, error)
 }
 
 type metadataServiceClient struct {
@@ -701,6 +705,33 @@ func (c *metadataServiceClient) CancelMigration(ctx context.Context, in *CancelM
 	return out, nil
 }
 
+func (c *metadataServiceClient) AcquirePartitionLease(ctx context.Context, in *AcquireLeaseRequest, opts ...grpc.CallOption) (*AcquireLeaseResponse, error) {
+	out := new(AcquireLeaseResponse)
+	err := c.cc.Invoke(ctx, "/rockskv.MetadataService/AcquirePartitionLease", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *metadataServiceClient) RenewPartitionLease(ctx context.Context, in *RenewLeaseRequest, opts ...grpc.CallOption) (*RenewLeaseResponse, error) {
+	out := new(RenewLeaseResponse)
+	err := c.cc.Invoke(ctx, "/rockskv.MetadataService/RenewPartitionLease", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *metadataServiceClient) RevokePartitionLease(ctx context.Context, in *RevokeLeaseRequest, opts ...grpc.CallOption) (*RevokeLeaseResponse, error) {
+	out := new(RevokeLeaseResponse)
+	err := c.cc.Invoke(ctx, "/rockskv.MetadataService/RevokePartitionLease", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MetadataServiceServer is the server API for MetadataService service.
 // All implementations must embed UnimplementedMetadataServiceServer
 // for forward compatibility
@@ -716,6 +747,10 @@ type MetadataServiceServer interface {
 	TriggerRebalance(context.Context, *TriggerRebalanceRequest) (*TriggerRebalanceResponse, error)
 	GetMigrationStatus(context.Context, *GetMigrationStatusRequest) (*GetMigrationStatusResponse, error)
 	CancelMigration(context.Context, *CancelMigrationRequest) (*CancelMigrationResponse, error)
+	// Partition Lease APIs (for split-brain prevention)
+	AcquirePartitionLease(context.Context, *AcquireLeaseRequest) (*AcquireLeaseResponse, error)
+	RenewPartitionLease(context.Context, *RenewLeaseRequest) (*RenewLeaseResponse, error)
+	RevokePartitionLease(context.Context, *RevokeLeaseRequest) (*RevokeLeaseResponse, error)
 	mustEmbedUnimplementedMetadataServiceServer()
 }
 
@@ -749,6 +784,15 @@ func (UnimplementedMetadataServiceServer) GetMigrationStatus(context.Context, *G
 }
 func (UnimplementedMetadataServiceServer) CancelMigration(context.Context, *CancelMigrationRequest) (*CancelMigrationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CancelMigration not implemented")
+}
+func (UnimplementedMetadataServiceServer) AcquirePartitionLease(context.Context, *AcquireLeaseRequest) (*AcquireLeaseResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AcquirePartitionLease not implemented")
+}
+func (UnimplementedMetadataServiceServer) RenewPartitionLease(context.Context, *RenewLeaseRequest) (*RenewLeaseResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RenewPartitionLease not implemented")
+}
+func (UnimplementedMetadataServiceServer) RevokePartitionLease(context.Context, *RevokeLeaseRequest) (*RevokeLeaseResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RevokePartitionLease not implemented")
 }
 func (UnimplementedMetadataServiceServer) mustEmbedUnimplementedMetadataServiceServer() {}
 
@@ -928,6 +972,60 @@ func _MetadataService_CancelMigration_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MetadataService_AcquirePartitionLease_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AcquireLeaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MetadataServiceServer).AcquirePartitionLease(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/rockskv.MetadataService/AcquirePartitionLease",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MetadataServiceServer).AcquirePartitionLease(ctx, req.(*AcquireLeaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MetadataService_RenewPartitionLease_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RenewLeaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MetadataServiceServer).RenewPartitionLease(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/rockskv.MetadataService/RenewPartitionLease",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MetadataServiceServer).RenewPartitionLease(ctx, req.(*RenewLeaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MetadataService_RevokePartitionLease_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeLeaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MetadataServiceServer).RevokePartitionLease(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/rockskv.MetadataService/RevokePartitionLease",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MetadataServiceServer).RevokePartitionLease(ctx, req.(*RevokeLeaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MetadataService_ServiceDesc is the grpc.ServiceDesc for MetadataService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -966,6 +1064,18 @@ var MetadataService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CancelMigration",
 			Handler:    _MetadataService_CancelMigration_Handler,
+		},
+		{
+			MethodName: "AcquirePartitionLease",
+			Handler:    _MetadataService_AcquirePartitionLease_Handler,
+		},
+		{
+			MethodName: "RenewPartitionLease",
+			Handler:    _MetadataService_RenewPartitionLease_Handler,
+		},
+		{
+			MethodName: "RevokePartitionLease",
+			Handler:    _MetadataService_RevokePartitionLease_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

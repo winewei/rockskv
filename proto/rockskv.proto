@@ -36,6 +36,11 @@ service MetadataService {
   rpc TriggerRebalance(TriggerRebalanceRequest) returns (TriggerRebalanceResponse);
   rpc GetMigrationStatus(GetMigrationStatusRequest) returns (GetMigrationStatusResponse);
   rpc CancelMigration(CancelMigrationRequest) returns (CancelMigrationResponse);
+
+  // Partition Lease APIs (for split-brain prevention)
+  rpc AcquirePartitionLease(AcquireLeaseRequest) returns (AcquireLeaseResponse);
+  rpc RenewPartitionLease(RenewLeaseRequest) returns (RenewLeaseResponse);
+  rpc RevokePartitionLease(RevokeLeaseRequest) returns (RevokeLeaseResponse);
 }
 
 // ========== KVService 消息定义 ==========
@@ -319,4 +324,34 @@ message InitClusterResponse {
   string message = 2;
   int32 partition_count = 3;
   int32 node_count = 4;
+}
+
+// ========== Partition Lease 消息定义 ==========
+
+message AcquireLeaseRequest {
+  uint32 partition_id = 1;
+  string node_addr = 2;
+}
+
+message AcquireLeaseResponse {
+  bool success = 1;
+  int64 lease_id = 2;
+  string message = 3;
+}
+
+message RenewLeaseRequest {
+  int64 lease_id = 1;
+}
+
+message RenewLeaseResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message RevokeLeaseRequest {
+  int64 lease_id = 1;
+}
+
+message RevokeLeaseResponse {
+  bool success = 1;
 }

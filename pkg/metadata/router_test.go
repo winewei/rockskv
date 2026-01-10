@@ -85,6 +85,15 @@ func (m *mockStore) UpdateNodeHeartbeat(ctx context.Context, nodeID string) erro
 	return nil
 }
 
+func (m *mockStore) UpdateNodeStatus(ctx context.Context, nodeID string, status NodeStatus) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if node, ok := m.nodes[nodeID]; ok {
+		node.Status = string(status)
+	}
+	return nil
+}
+
 func (m *mockStore) GetRouteTable(ctx context.Context) (*RouteTable, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -141,6 +150,22 @@ func (m *mockStore) DeleteMigrationState(ctx context.Context, partitionID uint32
 	defer m.mu.Unlock()
 	delete(m.migrationStates, partitionID)
 	return nil
+}
+
+func (m *mockStore) AcquirePartitionLease(ctx context.Context, partitionID uint32, nodeAddr string) (int64, error) {
+	return 1, nil // Mock: always succeed
+}
+
+func (m *mockStore) RenewPartitionLease(ctx context.Context, leaseID int64) error {
+	return nil
+}
+
+func (m *mockStore) RevokePartitionLease(ctx context.Context, leaseID int64) error {
+	return nil
+}
+
+func (m *mockStore) GetPartitionLeaseHolder(ctx context.Context, partitionID uint32) (string, error) {
+	return "", nil
 }
 
 func TestConstants(t *testing.T) {

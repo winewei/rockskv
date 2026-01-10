@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/linxGnu/grocksdb"
@@ -55,6 +56,13 @@ type Server struct {
 	metadataConn     *grpc.ClientConn
 	metadataClient   pb.MetadataServiceClient
 	logger           *zap.Logger
+
+	// Partition leases for split-brain prevention
+	// Maps partition ID to lease ID (only for Primary partitions)
+	partitionLeases map[uint32]int64
+	leaseMu         sync.RWMutex
+	leaseCtx        context.Context
+	leaseCancel     context.CancelFunc
 }
 
 // NewServer creates a new storage server
@@ -79,11 +87,17 @@ func NewServer(config *ServerConfig) (*Server, error) {
 		return nil, fmt.Errorf("failed to create sst directory: %w", err)
 	}
 
+	// Create lease context
+	leaseCtx, leaseCancel := context.WithCancel(context.Background())
+
 	server := &Server{
 		config:           config,
 		db:               db,
 		partitionManager: partitionManager,
 		logger:           logger,
+		partitionLeases:  make(map[uint32]int64),
+		leaseCtx:         leaseCtx,
+		leaseCancel:      leaseCancel,
 	}
 
 	return server, nil
@@ -126,6 +140,19 @@ func (s *Server) Start() error {
 
 // Stop gracefully stops the server
 func (s *Server) Stop() {
+	// Stop lease renewal loop
+	if s.leaseCancel != nil {
+		s.leaseCancel()
+	}
+
+	// Release all partition leases
+	s.releaseAllLeases()
+
+	// Close metadata connection
+	if s.metadataConn != nil {
+		s.metadataConn.Close()
+	}
+
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
 	}
@@ -133,6 +160,38 @@ func (s *Server) Stop() {
 		s.db.Close()
 	}
 	s.logger.Info("Storage server stopped")
+}
+
+// releaseAllLeases releases all held partition leases on shutdown
+func (s *Server) releaseAllLeases() {
+	if s.metadataClient == nil {
+		return
+	}
+
+	s.leaseMu.Lock()
+	defer s.leaseMu.Unlock()
+
+	for partitionID, leaseID := range s.partitionLeases {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		_, err := s.metadataClient.RevokePartitionLease(ctx, &pb.RevokeLeaseRequest{
+			LeaseId: leaseID,
+		})
+		cancel()
+
+		if err != nil {
+			s.logger.Warn("Failed to release partition lease on shutdown",
+				zap.Uint32("partition_id", partitionID),
+				zap.Int64("lease_id", leaseID),
+				zap.Error(err),
+			)
+		} else {
+			s.logger.Debug("Partition lease released",
+				zap.Uint32("partition_id", partitionID),
+			)
+		}
+	}
+
+	s.partitionLeases = make(map[uint32]int64)
 }
 
 // unaryInterceptor logs and records metrics for unary RPCs
@@ -609,6 +668,7 @@ func (s *Server) registerWithMetadata() {
 	}
 
 	go s.subscribeRouteUpdates()
+	go s.leaseRenewalLoop() // Start lease renewal for split-brain prevention
 	s.heartbeatLoop()
 }
 
@@ -653,7 +713,9 @@ func (s *Server) doRegister() error {
 }
 
 func (s *Server) heartbeatLoop() {
-	ticker := time.NewTicker(10 * time.Second)
+	// 100ms interval, matching etcd's heartbeat interval
+	// 10 missed heartbeats = 1 second timeout
+	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -661,7 +723,8 @@ func (s *Server) heartbeatLoop() {
 			continue
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Short timeout for heartbeat RPC
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		_, err := s.metadataClient.Heartbeat(ctx, &pb.HeartbeatRequest{
 			NodeId: s.config.NodeID,
 		})
@@ -708,6 +771,7 @@ func (s *Server) subscribeRouteUpdates() {
 
 func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAddr string) {
 	shouldExist := make(map[uint32]bool)
+	primaryPartitions := make(map[uint32]bool)
 	addedCount := 0
 	removedCount := 0
 
@@ -717,6 +781,9 @@ func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAdd
 
 		if isPrimary || isReplica {
 			shouldExist[p.PartitionId] = true
+			if isPrimary {
+				primaryPartitions[p.PartitionId] = true
+			}
 
 			if !s.partitionManager.HasPartition(p.PartitionId) {
 				if err := s.partitionManager.AddPartition(p.PartitionId, isPrimary); err != nil {
@@ -726,10 +793,25 @@ func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAdd
 					)
 				} else {
 					addedCount++
+					// Acquire lease for new Primary partition
+					if isPrimary {
+						s.tryAcquireLease(p.PartitionId, myAddr)
+					}
 				}
 			}
 		}
 	}
+
+	// Release leases for partitions we're no longer Primary for
+	s.leaseMu.Lock()
+	for partitionID, leaseID := range s.partitionLeases {
+		if !primaryPartitions[partitionID] {
+			// We're no longer Primary, release the lease
+			s.releaseLeaseAsync(leaseID)
+			delete(s.partitionLeases, partitionID)
+		}
+	}
+	s.leaseMu.Unlock()
 
 	currentPartitions := s.partitionManager.ListPartitions()
 	for _, partitionID := range currentPartitions {
@@ -751,5 +833,102 @@ func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAdd
 			zap.Int("removed", removedCount),
 			zap.Int("total", s.partitionManager.PartitionCount()),
 		)
+	}
+}
+
+// tryAcquireLease attempts to acquire a partition lease
+func (s *Server) tryAcquireLease(partitionID uint32, myAddr string) {
+	if s.metadataClient == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	resp, err := s.metadataClient.AcquirePartitionLease(ctx, &pb.AcquireLeaseRequest{
+		PartitionId: partitionID,
+		NodeAddr:    myAddr,
+	})
+
+	if err != nil || !resp.Success {
+		s.logger.Warn("Failed to acquire partition lease",
+			zap.Uint32("partition_id", partitionID),
+			zap.Error(err),
+		)
+		return
+	}
+
+	s.leaseMu.Lock()
+	s.partitionLeases[partitionID] = resp.LeaseId
+	s.leaseMu.Unlock()
+
+	s.logger.Debug("Partition lease acquired",
+		zap.Uint32("partition_id", partitionID),
+		zap.Int64("lease_id", resp.LeaseId),
+	)
+}
+
+// releaseLeaseAsync releases a lease asynchronously
+func (s *Server) releaseLeaseAsync(leaseID int64) {
+	if s.metadataClient == nil {
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+
+		_, _ = s.metadataClient.RevokePartitionLease(ctx, &pb.RevokeLeaseRequest{
+			LeaseId: leaseID,
+		})
+	}()
+}
+
+// leaseRenewalLoop periodically renews all held partition leases
+func (s *Server) leaseRenewalLoop() {
+	// Renew leases every 100ms (TTL is 1s, so 10 chances to renew)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.leaseCtx.Done():
+			return
+		case <-ticker.C:
+			s.renewAllLeases()
+		}
+	}
+}
+
+func (s *Server) renewAllLeases() {
+	if s.metadataClient == nil {
+		return
+	}
+
+	s.leaseMu.RLock()
+	leases := make(map[uint32]int64, len(s.partitionLeases))
+	for k, v := range s.partitionLeases {
+		leases[k] = v
+	}
+	s.leaseMu.RUnlock()
+
+	for partitionID, leaseID := range leases {
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		resp, err := s.metadataClient.RenewPartitionLease(ctx, &pb.RenewLeaseRequest{
+			LeaseId: leaseID,
+		})
+		cancel()
+
+		if err != nil || !resp.Success {
+			s.logger.Warn("Failed to renew partition lease",
+				zap.Uint32("partition_id", partitionID),
+				zap.Int64("lease_id", leaseID),
+				zap.Error(err),
+			)
+			// Remove from map - lease may have expired
+			s.leaseMu.Lock()
+			delete(s.partitionLeases, partitionID)
+			s.leaseMu.Unlock()
+		}
 	}
 }

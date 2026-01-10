@@ -11,14 +11,21 @@ import (
 )
 
 const (
-	// DefaultHeartbeatInterval is the default interval for heartbeat checks
-	DefaultHeartbeatInterval = 5 * time.Second
+	// DefaultHeartbeatInterval is the interval for sending heartbeats (Storage -> Metadata)
+	// Reference: etcd uses 100ms heartbeat interval
+	DefaultHeartbeatInterval = 100 * time.Millisecond
 
-	// DefaultHeartbeatTimeout is the default timeout for considering a node dead
-	DefaultHeartbeatTimeout = 30 * time.Second
+	// DefaultHeartbeatTimeout is the timeout for considering a node dead
+	// 10 missed heartbeats = 1 second
+	DefaultHeartbeatTimeout = 1 * time.Second
 
 	// DefaultFailoverDelay is the delay before triggering failover
-	DefaultFailoverDelay = 10 * time.Second
+	// Wait for potential network glitches to resolve
+	DefaultFailoverDelay = 5 * time.Second
+
+	// DefaultReplicaRecoveryDelay is the delay before creating new replica
+	// Wait for node to potentially recover
+	DefaultReplicaRecoveryDelay = 10 * time.Minute
 )
 
 // FailoverConfig holds failover configuration
@@ -166,27 +173,44 @@ func (fm *FailoverManager) handleNodeFailure(nodeID string) {
 		zap.String("node_id", nodeID),
 	)
 
-	// Find partitions affected by this node failure
-	table := fm.router.GetRouteTable()
-	affectedPartitions := make([]uint32, 0)
-
-	for partitionID, partition := range table.Partitions {
-		if partition.Primary == nodeID {
-			affectedPartitions = append(affectedPartitions, partitionID)
-		}
+	// Update node status to OFFLINE
+	if err := fm.store.UpdateNodeStatus(fm.ctx, nodeID, NodeStatusOffline); err != nil {
+		fm.logger.Error("Failed to update node status to OFFLINE",
+			zap.String("node_id", nodeID),
+			zap.Error(err),
+		)
 	}
 
-	if len(affectedPartitions) == 0 {
+	// Find partitions affected by this node failure
+	// Need to find by node address, not node ID
+	node, err := fm.store.GetNode(fm.ctx, nodeID)
+	if err != nil || node == nil {
+		fm.logger.Error("Failed to get node info", zap.String("node_id", nodeID), zap.Error(err))
 		return
+	}
+
+	table := fm.router.GetRouteTable()
+	affectedPrimaryPartitions := make([]uint32, 0)
+	affectedReplicaPartitions := make([]uint32, 0)
+
+	for partitionID, partition := range table.Partitions {
+		if partition.Primary == node.Addr {
+			affectedPrimaryPartitions = append(affectedPrimaryPartitions, partitionID)
+		}
+		if partition.Replica == node.Addr {
+			affectedReplicaPartitions = append(affectedReplicaPartitions, partitionID)
+		}
 	}
 
 	fm.logger.Info("Partitions affected by node failure",
 		zap.String("node_id", nodeID),
-		zap.Int("count", len(affectedPartitions)),
+		zap.String("node_addr", node.Addr),
+		zap.Int("primary_count", len(affectedPrimaryPartitions)),
+		zap.Int("replica_count", len(affectedReplicaPartitions)),
 	)
 
-	// Promote replicas for affected partitions
-	for _, partitionID := range affectedPartitions {
+	// Promote replicas for partitions where this node was Primary
+	for _, partitionID := range affectedPrimaryPartitions {
 		if err := fm.router.PromoteReplica(fm.ctx, partitionID); err != nil {
 			fm.logger.Error("Failed to promote replica",
 				zap.Uint32("partition_id", partitionID),
