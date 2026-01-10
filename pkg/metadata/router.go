@@ -569,3 +569,250 @@ func (r *Router) GetPartitionMigrationTarget(partitionID uint32) (string, pb.Mig
 
 	return migrationInfo.Target, migrationInfo.State
 }
+
+// ShutdownNode performs a controlled shutdown of a storage node
+// This migrates all partitions from the node before marking it as removed
+func (r *Router) ShutdownNode(ctx context.Context, nodeID string, force bool, scheduler *MigrationScheduler) (migrated, failed int32, err error) {
+	// Step 1: Get node info
+	node, err := r.store.GetNode(ctx, nodeID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get node %s: %w", nodeID, err)
+	}
+	if node == nil {
+		return 0, 0, fmt.Errorf("node %s not found", nodeID)
+	}
+
+	r.logger.Info("Starting controlled shutdown",
+		zap.String("node_id", nodeID),
+		zap.String("node_addr", node.Addr),
+		zap.Bool("force", force),
+	)
+
+	// Step 2: Set node status to DRAINING
+	if err := r.store.UpdateNodeStatus(ctx, nodeID, NodeStatusDraining); err != nil {
+		return 0, 0, fmt.Errorf("failed to set node status to DRAINING: %w", err)
+	}
+
+	// Step 3: Find all partitions on this node
+	r.mu.RLock()
+	table := r.routeTable
+	r.mu.RUnlock()
+
+	primaryPartitions := make([]uint32, 0)
+	replicaPartitions := make([]uint32, 0)
+
+	for partitionID, partition := range table.Partitions {
+		if partition.Primary == node.Addr {
+			primaryPartitions = append(primaryPartitions, partitionID)
+		}
+		if partition.Replica == node.Addr {
+			replicaPartitions = append(replicaPartitions, partitionID)
+		}
+	}
+
+	totalPartitions := len(primaryPartitions) + len(replicaPartitions)
+	r.logger.Info("Found partitions on node",
+		zap.String("node_id", nodeID),
+		zap.Int("primary_count", len(primaryPartitions)),
+		zap.Int("replica_count", len(replicaPartitions)),
+		zap.Int("total", totalPartitions),
+	)
+
+	// If force mode, skip migration
+	if force {
+		r.logger.Warn("Force shutdown requested, skipping migration",
+			zap.String("node_id", nodeID),
+		)
+		if err := r.store.UpdateNodeStatus(ctx, nodeID, NodeStatusRemoved); err != nil {
+			return 0, int32(totalPartitions), fmt.Errorf("failed to set node status to REMOVED: %w", err)
+		}
+		// Trigger rebalance to assign new nodes
+		go func() {
+			rebalanceCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := r.RebalancePartitions(rebalanceCtx); err != nil {
+				r.logger.Error("Failed to rebalance after forced shutdown", zap.Error(err))
+			}
+		}()
+		return 0, int32(totalPartitions), nil
+	}
+
+	// Step 4: Get online nodes to migrate to
+	onlineNodes, err := r.store.ListNodes(ctx, NodeRoleStorage)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to list storage nodes: %w", err)
+	}
+
+	// Filter out the draining node and offline nodes
+	targetNodes := make([]*NodeInfo, 0)
+	for _, n := range onlineNodes {
+		if n.ID != nodeID && (n.Status == string(NodeStatusOnline) || n.Status == "online") {
+			targetNodes = append(targetNodes, n)
+		}
+	}
+
+	if len(targetNodes) < MinReplicaNodes-1 {
+		return 0, 0, fmt.Errorf("not enough online nodes for migration (need %d, have %d)", MinReplicaNodes-1, len(targetNodes))
+	}
+
+	// Step 5: Build new hash ring without the draining node
+	newHashRing := NewConsistentHash(DefaultVirtualNodes)
+	for _, n := range targetNodes {
+		newHashRing.AddNode(n.Addr)
+	}
+
+	// Step 6: Schedule migrations
+	migratedCount := int32(0)
+	failedCount := int32(0)
+
+	// Migrate primary partitions first (higher priority)
+	for _, partitionID := range primaryPartitions {
+		newPrimary, newReplica := newHashRing.GetNodes(partitionID)
+
+		// Prefer promoting existing replica if possible
+		partition := table.Partitions[partitionID]
+		if partition.Replica != "" && partition.Replica != node.Addr {
+			// Promote replica to primary
+			if err := r.PromoteReplica(ctx, partitionID); err != nil {
+				r.logger.Error("Failed to promote replica",
+					zap.Uint32("partition_id", partitionID),
+					zap.Error(err),
+				)
+				failedCount++
+				continue
+			}
+			migratedCount++
+		} else {
+			// Need to migrate to new node
+			task := &MigrationTask{
+				PartitionID: partitionID,
+				Source:      node.Addr,
+				Target:      newPrimary,
+				Priority:    pb.MigrationPriority_PRIORITY_HIGH,
+				IsPrimary:   true,
+			}
+			if scheduler != nil {
+				if err := scheduler.AddTask(task); err != nil {
+					r.logger.Error("Failed to add migration task",
+						zap.Uint32("partition_id", partitionID),
+						zap.Error(err),
+					)
+					failedCount++
+				}
+			} else {
+				// Direct migration without scheduler
+				if err := r.CompleteMigration(ctx, partitionID, newPrimary, true); err != nil {
+					r.logger.Error("Failed to migrate primary",
+						zap.Uint32("partition_id", partitionID),
+						zap.Error(err),
+					)
+					failedCount++
+				} else {
+					migratedCount++
+				}
+			}
+		}
+
+		// Also need to assign new replica if current replica was on draining node
+		if partition.Replica == node.Addr && newReplica != "" {
+			task := &MigrationTask{
+				PartitionID: partitionID,
+				Source:      node.Addr,
+				Target:      newReplica,
+				Priority:    pb.MigrationPriority_PRIORITY_NORMAL,
+				IsPrimary:   false,
+			}
+			if scheduler != nil {
+				_ = scheduler.AddTask(task)
+			} else {
+				_ = r.CompleteMigration(ctx, partitionID, newReplica, false)
+			}
+		}
+	}
+
+	// Migrate replica partitions (normal priority)
+	for _, partitionID := range replicaPartitions {
+		// Skip if we already handled this partition's replica
+		partition := table.Partitions[partitionID]
+		if partition.Primary == node.Addr {
+			continue // Already handled above
+		}
+
+		_, newReplica := newHashRing.GetNodes(partitionID)
+		if newReplica == "" {
+			continue
+		}
+
+		task := &MigrationTask{
+			PartitionID: partitionID,
+			Source:      node.Addr,
+			Target:      newReplica,
+			Priority:    pb.MigrationPriority_PRIORITY_NORMAL,
+			IsPrimary:   false,
+		}
+		if scheduler != nil {
+			if err := scheduler.AddTask(task); err != nil {
+				r.logger.Error("Failed to add migration task",
+					zap.Uint32("partition_id", partitionID),
+					zap.Error(err),
+				)
+				failedCount++
+			}
+		} else {
+			if err := r.CompleteMigration(ctx, partitionID, newReplica, false); err != nil {
+				r.logger.Error("Failed to migrate replica",
+					zap.Uint32("partition_id", partitionID),
+					zap.Error(err),
+				)
+				failedCount++
+			} else {
+				migratedCount++
+			}
+		}
+	}
+
+	// Step 7: Wait for migrations to complete (if using scheduler)
+	if scheduler != nil {
+		waitCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+		if err := scheduler.WaitForCompletion(waitCtx); err != nil {
+			r.logger.Warn("Timeout waiting for migrations", zap.Error(err))
+		}
+		status := scheduler.GetStatus()
+		migratedCount = int32(status.TotalMigrated)
+		failedCount = int32(status.TotalFailed)
+	}
+
+	// Step 8: Update hash ring and set node as removed
+	r.mu.Lock()
+	r.hashRing.RemoveNode(node.Addr)
+	r.mu.Unlock()
+
+	if err := r.store.UpdateNodeStatus(ctx, nodeID, NodeStatusRemoved); err != nil {
+		r.logger.Error("Failed to set node status to REMOVED", zap.Error(err))
+	}
+
+	r.logger.Info("Controlled shutdown completed",
+		zap.String("node_id", nodeID),
+		zap.Int32("migrated", migratedCount),
+		zap.Int32("failed", failedCount),
+	)
+
+	return migratedCount, failedCount, nil
+}
+
+// GetNodePartitionCounts returns the number of primary and replica partitions for a node
+func (r *Router) GetNodePartitionCounts(nodeAddr string) (primaryCount, replicaCount int) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, partition := range r.routeTable.Partitions {
+		if partition.Primary == nodeAddr {
+			primaryCount++
+		}
+		if partition.Replica == nodeAddr {
+			replicaCount++
+		}
+	}
+	return
+}

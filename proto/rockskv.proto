@@ -45,6 +45,10 @@ service MetadataService {
   rpc AcquirePartitionLease(AcquireLeaseRequest) returns (AcquireLeaseResponse);
   rpc RenewPartitionLease(RenewLeaseRequest) returns (RenewLeaseResponse);
   rpc RevokePartitionLease(RevokeLeaseRequest) returns (RevokeLeaseResponse);
+
+  // Node lifecycle APIs (Controlled Shutdown)
+  rpc ShutdownNode(ShutdownNodeRequest) returns (ShutdownNodeResponse);
+  rpc GetNodeStatus(GetNodeStatusRequest) returns (GetNodeStatusResponse);
 }
 
 // ========== KVService 消息定义 ==========
@@ -395,4 +399,57 @@ message GetReplicationStatusResponse {
   int64 committed_offset = 4;     // Offset confirmed persisted
   int64 replication_lag = 5;      // Lag in number of entries (Primary only)
   string replica_addr = 6;        // Address of replica (Primary only)
+}
+
+// ========== Controlled Shutdown 消息定义 ==========
+
+enum NodeStatus {
+  NODE_ONLINE = 0;    // Node is healthy and serving
+  NODE_OFFLINE = 1;   // Node heartbeat timeout
+  NODE_DRAINING = 2;  // Node preparing for shutdown, migrating partitions
+  NODE_REMOVED = 3;   // Node has been removed from cluster
+}
+
+message ShutdownNodeRequest {
+  string node_id = 1;
+  bool force = 2;                   // Force shutdown without waiting for migration
+  int64 migration_timeout_ms = 3;   // Max time to wait for migrations (0 for default)
+}
+
+message ShutdownNodeResponse {
+  bool success = 1;
+  string message = 2;
+  int32 partitions_migrated = 3;
+  int32 partitions_failed = 4;
+}
+
+message GetNodeStatusRequest {
+  string node_id = 1;
+}
+
+message GetNodeStatusResponse {
+  string node_id = 1;
+  NodeStatus status = 2;
+  string addr = 3;
+  int64 last_heartbeat = 4;
+  int32 primary_partition_count = 5;
+  int32 replica_partition_count = 6;
+  bool is_draining = 7;
+  int32 draining_partitions_remaining = 8;
+}
+
+// ========== Migration Scheduler 消息定义 ==========
+
+enum MigrationPriority {
+  PRIORITY_LOW = 0;
+  PRIORITY_NORMAL = 1;
+  PRIORITY_HIGH = 2;
+  PRIORITY_URGENT = 3;  // For failover scenarios
+}
+
+message MigrationConfig {
+  int64 bandwidth_limit_bytes = 1;  // Bytes per second per migration, 0 for unlimited
+  int32 max_concurrent = 2;          // Max concurrent partition migrations, 0 for default (4)
+  MigrationPriority priority = 3;    // Priority for this migration batch
+  bool pause_on_error = 4;           // Pause remaining migrations if one fails
 }

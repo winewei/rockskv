@@ -512,3 +512,113 @@ func (s *Server) RevokePartitionLease(ctx context.Context, req *pb.RevokeLeaseRe
 
 	return &pb.RevokeLeaseResponse{Success: true}, nil
 }
+
+// ShutdownNode implements MetadataService.ShutdownNode
+// This performs a controlled shutdown of a storage node
+func (s *Server) ShutdownNode(ctx context.Context, req *pb.ShutdownNodeRequest) (*pb.ShutdownNodeResponse, error) {
+	s.logger.Info("Shutdown node request received",
+		zap.String("node_id", req.NodeId),
+		zap.Bool("force", req.Force),
+	)
+
+	// Create migration scheduler for this shutdown operation
+	var scheduler *MigrationScheduler
+	if !req.Force {
+		scheduler = NewMigrationScheduler(s.router, s.store)
+		scheduler.Start()
+		defer scheduler.Stop()
+	}
+
+	// Set migration timeout if specified
+	var timeoutCtx context.Context
+	var cancel context.CancelFunc
+	if req.MigrationTimeoutMs > 0 {
+		timeoutCtx, cancel = context.WithTimeout(ctx, time.Duration(req.MigrationTimeoutMs)*time.Millisecond)
+	} else {
+		// Default 5 minute timeout
+		timeoutCtx, cancel = context.WithTimeout(ctx, 5*time.Minute)
+	}
+	defer cancel()
+
+	migrated, failed, err := s.router.ShutdownNode(timeoutCtx, req.NodeId, req.Force, scheduler)
+	if err != nil {
+		s.logger.Error("Failed to shutdown node",
+			zap.String("node_id", req.NodeId),
+			zap.Error(err),
+		)
+		return &pb.ShutdownNodeResponse{
+			Success:            false,
+			Message:            err.Error(),
+			PartitionsMigrated: migrated,
+			PartitionsFailed:   failed,
+		}, nil
+	}
+
+	s.logger.Info("Node shutdown completed",
+		zap.String("node_id", req.NodeId),
+		zap.Int32("partitions_migrated", migrated),
+		zap.Int32("partitions_failed", failed),
+	)
+
+	return &pb.ShutdownNodeResponse{
+		Success:            true,
+		Message:            "node shutdown completed successfully",
+		PartitionsMigrated: migrated,
+		PartitionsFailed:   failed,
+	}, nil
+}
+
+// GetNodeStatus implements MetadataService.GetNodeStatus
+func (s *Server) GetNodeStatus(ctx context.Context, req *pb.GetNodeStatusRequest) (*pb.GetNodeStatusResponse, error) {
+	node, err := s.store.GetNode(ctx, req.NodeId)
+	if err != nil {
+		s.logger.Error("Failed to get node",
+			zap.String("node_id", req.NodeId),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+
+	if node == nil {
+		return nil, fmt.Errorf("node %s not found", req.NodeId)
+	}
+
+	// Get partition counts
+	primaryCount, replicaCount := s.router.GetNodePartitionCounts(node.Addr)
+
+	// Convert status
+	var status pb.NodeStatus
+	switch NodeStatus(node.Status) {
+	case NodeStatusOnline:
+		status = pb.NodeStatus_NODE_ONLINE
+	case NodeStatusOffline:
+		status = pb.NodeStatus_NODE_OFFLINE
+	case NodeStatusDraining:
+		status = pb.NodeStatus_NODE_DRAINING
+	case NodeStatusRemoved:
+		status = pb.NodeStatus_NODE_REMOVED
+	default:
+		if node.Status == "online" {
+			status = pb.NodeStatus_NODE_ONLINE
+		} else {
+			status = pb.NodeStatus_NODE_OFFLINE
+		}
+	}
+
+	isDraining := status == pb.NodeStatus_NODE_DRAINING
+	drainingRemaining := int32(0)
+	if isDraining {
+		drainingRemaining = int32(primaryCount + replicaCount)
+	}
+
+	return &pb.GetNodeStatusResponse{
+		NodeId:                     node.ID,
+		Status:                     status,
+		Addr:                       node.Addr,
+		LastHeartbeat:              node.LastHeartbeat.UnixNano(),
+		PrimaryPartitionCount:      int32(primaryCount),
+		ReplicaPartitionCount:      int32(replicaCount),
+		IsDraining:                 isDraining,
+		DrainingPartitionsRemaining: drainingRemaining,
+	}, nil
+}

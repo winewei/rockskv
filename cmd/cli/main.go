@@ -194,6 +194,12 @@ func main() {
 	case "init-cluster", "init":
 		runInitCluster(args[1:])
 
+	case "shutdown-node", "shutdown":
+		runShutdownNode(args[1:])
+
+	case "node-status", "nstatus":
+		runNodeStatus(args[1:])
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
 		printUsage()
@@ -231,6 +237,10 @@ func printUsage() {
 	fmt.Println("  rebalance [options]          Trigger cluster rebalance")
 	fmt.Println("  migration-status             Show migration status")
 	fmt.Println("  migration-cancel             Cancel ongoing migration")
+	fmt.Println()
+	fmt.Println("Node Lifecycle Commands:")
+	fmt.Println("  shutdown-node <node_id>      Gracefully shutdown a storage node")
+	fmt.Println("  node-status <node_id>        Show node status and partition counts")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  rockskv-cli put foo bar")
@@ -764,6 +774,134 @@ func getClusterStateString(state pb.ClusterState) string {
 		return "INITIALIZING"
 	case pb.ClusterState_CLUSTER_RUNNING:
 		return "RUNNING"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+func runShutdownNode(args []string) {
+	fs := flag.NewFlagSet("shutdown-node", flag.ExitOnError)
+	metadataAddr := fs.String("metadata", "localhost:9000", "Metadata service address")
+	force := fs.Bool("force", false, "Force shutdown without migration")
+	timeout := fs.Int64("timeout", 0, "Migration timeout in milliseconds (0 for default 5 minutes)")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to parse flags: %v\n", err)
+		return
+	}
+
+	if fs.NArg() < 1 {
+		fmt.Fprintln(os.Stderr, "Usage: shutdown-node <node_id>")
+		os.Exit(1)
+	}
+
+	nodeID := fs.Arg(0)
+
+	client, conn, err := getMetadataClient(*metadataAddr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+
+	fmt.Printf("Initiating controlled shutdown for node: %s\n", nodeID)
+	if *force {
+		fmt.Println("WARNING: Force mode enabled - partitions will not be migrated!")
+	}
+
+	// Use a longer timeout for shutdown operations
+	timeoutDuration := 10 * time.Minute
+	if *timeout > 0 {
+		timeoutDuration = time.Duration(*timeout) * time.Millisecond
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
+	defer cancel()
+
+	resp, err := client.ShutdownNode(ctx, &pb.ShutdownNodeRequest{
+		NodeId:             nodeID,
+		Force:              *force,
+		MigrationTimeoutMs: *timeout,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if resp.Success {
+		fmt.Printf("Node shutdown completed successfully!\n")
+		fmt.Printf("  Partitions migrated: %d\n", resp.PartitionsMigrated)
+		fmt.Printf("  Partitions failed:   %d\n", resp.PartitionsFailed)
+	} else {
+		fmt.Fprintf(os.Stderr, "Shutdown failed: %s\n", resp.Message)
+		fmt.Printf("  Partitions migrated: %d\n", resp.PartitionsMigrated)
+		fmt.Printf("  Partitions failed:   %d\n", resp.PartitionsFailed)
+		os.Exit(1)
+	}
+}
+
+func runNodeStatus(args []string) {
+	fs := flag.NewFlagSet("node-status", flag.ExitOnError)
+	metadataAddr := fs.String("metadata", "localhost:9000", "Metadata service address")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to parse flags: %v\n", err)
+		return
+	}
+
+	if fs.NArg() < 1 {
+		fmt.Fprintln(os.Stderr, "Usage: node-status <node_id>")
+		os.Exit(1)
+	}
+
+	nodeID := fs.Arg(0)
+
+	client, conn, err := getMetadataClient(*metadataAddr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.GetNodeStatus(ctx, &pb.GetNodeStatusRequest{
+		NodeId: nodeID,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Node Status: %s\n", nodeID)
+	fmt.Printf("  Address:            %s\n", resp.Addr)
+	fmt.Printf("  Status:             %s\n", getNodeStatusString(resp.Status))
+	fmt.Printf("  Primary Partitions: %d\n", resp.PrimaryPartitionCount)
+	fmt.Printf("  Replica Partitions: %d\n", resp.ReplicaPartitionCount)
+	fmt.Printf("  Total Partitions:   %d\n", resp.PrimaryPartitionCount+resp.ReplicaPartitionCount)
+
+	if resp.LastHeartbeat > 0 {
+		lastHB := time.Unix(0, resp.LastHeartbeat)
+		fmt.Printf("  Last Heartbeat:     %s (%s ago)\n",
+			lastHB.Format("2006-01-02 15:04:05"),
+			time.Since(lastHB).Truncate(time.Second))
+	}
+
+	if resp.IsDraining {
+		fmt.Printf("  Draining:           YES\n")
+		fmt.Printf("  Remaining:          %d partitions\n", resp.DrainingPartitionsRemaining)
+	}
+}
+
+func getNodeStatusString(status pb.NodeStatus) string {
+	switch status {
+	case pb.NodeStatus_NODE_ONLINE:
+		return "ONLINE"
+	case pb.NodeStatus_NODE_OFFLINE:
+		return "OFFLINE"
+	case pb.NodeStatus_NODE_DRAINING:
+		return "DRAINING"
+	case pb.NodeStatus_NODE_REMOVED:
+		return "REMOVED"
 	default:
 		return "UNKNOWN"
 	}

@@ -25,6 +25,8 @@ type MigrationConfig struct {
 	CatchupThreshold int64         `mapstructure:"catchup_threshold"`  // Bytes threshold for catchup phase
 	RetryAttempts    int           `mapstructure:"retry_attempts"`     // Max retry attempts per partition
 	RetryDelay       time.Duration `mapstructure:"retry_delay"`        // Delay between retries
+	PauseOnError     bool          `mapstructure:"pause_on_error"`     // Pause remaining migrations if one fails
+	Priority         pb.MigrationPriority `mapstructure:"priority"`    // Migration priority
 }
 
 // DefaultMigrationConfig returns default migration configuration
@@ -36,6 +38,8 @@ func DefaultMigrationConfig() *MigrationConfig {
 		CatchupThreshold: 10 * 1024 * 1024,  // 10 MB
 		RetryAttempts:    3,
 		RetryDelay:       5 * time.Second,
+		PauseOnError:     false,
+		Priority:         pb.MigrationPriority_PRIORITY_NORMAL,
 	}
 }
 
@@ -196,9 +200,10 @@ type MigrationPlanItem struct {
 	SourceNode  string
 	TargetNode  string
 	IsPrimary   bool // true if migrating primary, false if migrating replica
+	Priority    pb.MigrationPriority
 }
 
-// calculateMigrationPlan calculates which partitions need to be migrated
+// calculateMigrationPlan calculates which partitions need to be migrated using consistent hashing
 func (mc *MigrationController) calculateMigrationPlan(currentTable *RouteTable, nodes []*NodeInfo) []MigrationPlanItem {
 	var plan []MigrationPlanItem
 
@@ -207,59 +212,92 @@ func (mc *MigrationController) calculateMigrationPlan(currentTable *RouteTable, 
 		return plan
 	}
 
-	// Build address set
-	addrSet := make(map[string]bool)
+	// Filter online nodes only
+	onlineNodes := make([]*NodeInfo, 0, len(nodes))
 	for _, node := range nodes {
+		if node.Status == string(NodeStatusOnline) || node.Status == "online" {
+			onlineNodes = append(onlineNodes, node)
+		}
+	}
+
+	if len(onlineNodes) < MinReplicaNodes {
+		mc.logger.Warn("Not enough online nodes for rebalance",
+			zap.Int("online_nodes", len(onlineNodes)),
+			zap.Int("required", MinReplicaNodes),
+		)
+		return plan
+	}
+
+	// Build consistent hash ring with online nodes
+	hashRing := NewConsistentHash(DefaultVirtualNodes)
+	addrSet := make(map[string]bool)
+	for _, node := range onlineNodes {
+		hashRing.AddNode(node.Addr)
 		addrSet[node.Addr] = true
 	}
 
-	// Calculate ideal distribution
-	partitionsPerNode := TotalPartitions / nodeCount
-	nodeLoad := make(map[string]int)
-	for _, node := range nodes {
-		nodeLoad[node.Addr] = 0
-	}
-
-	// Count current load
-	for _, partition := range currentTable.Partitions {
-		if addrSet[partition.Primary] {
-			nodeLoad[partition.Primary]++
-		}
-	}
-
-	// Find overloaded and underloaded nodes
+	// Compare current assignment with consistent hash assignment
 	for partitionID, partition := range currentTable.Partitions {
-		// Check if current primary is not in the cluster
-		if !addrSet[partition.Primary] {
-			// Primary node is gone, need to migrate from replica or reassign
-			targetIdx := int(partitionID) % nodeCount
+		newPrimary, newReplica := hashRing.GetNodes(partitionID)
+
+		// Check if primary needs to change
+		if partition.Primary != newPrimary {
+			// Determine priority based on situation
+			priority := pb.MigrationPriority_PRIORITY_NORMAL
+
+			// If current primary is offline, high priority
+			if !addrSet[partition.Primary] {
+				priority = pb.MigrationPriority_PRIORITY_HIGH
+			}
+
+			// Prefer promoting existing replica if it matches new primary
+			if partition.Replica == newPrimary {
+				// Can promote replica instead of migrating
+				plan = append(plan, MigrationPlanItem{
+					PartitionID: partitionID,
+					SourceNode:  partition.Primary,
+					TargetNode:  partition.Replica,
+					IsPrimary:   true,
+					Priority:    priority,
+				})
+			} else {
+				// Need to migrate primary
+				plan = append(plan, MigrationPlanItem{
+					PartitionID: partitionID,
+					SourceNode:  partition.Primary,
+					TargetNode:  newPrimary,
+					IsPrimary:   true,
+					Priority:    priority,
+				})
+			}
+		}
+
+		// Check if replica needs to change
+		if partition.Replica != newReplica && partition.Primary != newReplica {
+			priority := pb.MigrationPriority_PRIORITY_LOW
+			if !addrSet[partition.Replica] {
+				priority = pb.MigrationPriority_PRIORITY_NORMAL
+			}
+
 			plan = append(plan, MigrationPlanItem{
 				PartitionID: partitionID,
 				SourceNode:  partition.Replica,
-				TargetNode:  nodes[targetIdx].Addr,
-				IsPrimary:   true,
+				TargetNode:  newReplica,
+				IsPrimary:   false,
+				Priority:    priority,
 			})
-			continue
-		}
-
-		// Check if primary is overloaded and can give to underloaded node
-		if nodeLoad[partition.Primary] > partitionsPerNode+1 {
-			// Find an underloaded node
-			for _, node := range nodes {
-				if nodeLoad[node.Addr] < partitionsPerNode && node.Addr != partition.Primary && node.Addr != partition.Replica {
-					plan = append(plan, MigrationPlanItem{
-						PartitionID: partitionID,
-						SourceNode:  partition.Primary,
-						TargetNode:  node.Addr,
-						IsPrimary:   true,
-					})
-					nodeLoad[partition.Primary]--
-					nodeLoad[node.Addr]++
-					break
-				}
-			}
 		}
 	}
+
+	// Sort plan by priority (higher priority first)
+	sort.Slice(plan, func(i, j int) bool {
+		return plan[i].Priority > plan[j].Priority
+	})
+
+	mc.logger.Info("Migration plan calculated using consistent hashing",
+		zap.Int("total_migrations", len(plan)),
+		zap.Int("online_nodes", len(onlineNodes)),
+	)
 
 	return plan
 }
@@ -283,6 +321,8 @@ func (mc *MigrationController) executeMigration(ctx context.Context, migration *
 			zap.String("status", migration.Status),
 			zap.Int32("completed", migration.CompletedPartitions),
 			zap.Int32("failed", migration.FailedPartitions),
+			zap.Int64("bandwidth_limit", config.BandwidthLimit),
+			zap.Int("max_concurrent", config.MaxConcurrent),
 		)
 	}()
 
@@ -290,14 +330,37 @@ func (mc *MigrationController) executeMigration(ctx context.Context, migration *
 	sem := make(chan struct{}, config.MaxConcurrent)
 	var wg sync.WaitGroup
 
+	// Track if we should pause on error
+	var paused atomic.Bool
+
+	mc.logger.Info("Starting migration execution",
+		zap.Int("total_partitions", len(plan)),
+		zap.Int("max_concurrent", config.MaxConcurrent),
+		zap.Int64("bandwidth_limit", config.BandwidthLimit),
+		zap.Bool("pause_on_error", config.PauseOnError),
+	)
+
 	for _, item := range plan {
 		select {
 		case <-ctx.Done():
 			migration.mu.Lock()
 			migration.Status = "cancelled"
 			migration.mu.Unlock()
+			mc.logger.Info("Migration cancelled by context")
 			return
 		default:
+		}
+
+		// Check if paused due to error
+		if config.PauseOnError && paused.Load() {
+			migration.mu.Lock()
+			migration.Status = "paused_on_error"
+			migration.mu.Unlock()
+			mc.logger.Warn("Migration paused due to error",
+				zap.Int32("completed", migration.CompletedPartitions),
+				zap.Int32("failed", migration.FailedPartitions),
+			)
+			break
 		}
 
 		sem <- struct{}{}
@@ -308,6 +371,13 @@ func (mc *MigrationController) executeMigration(ctx context.Context, migration *
 				<-sem
 				wg.Done()
 			}()
+
+			mc.logger.Debug("Starting partition migration",
+				zap.Uint32("partition_id", item.PartitionID),
+				zap.String("source", item.SourceNode),
+				zap.String("target", item.TargetNode),
+				zap.Int32("priority", int32(item.Priority)),
+			)
 
 			err := mc.migratePartition(ctx, migration, item, config)
 
@@ -321,11 +391,16 @@ func (mc *MigrationController) executeMigration(ctx context.Context, migration *
 					zap.Uint32("partition_id", item.PartitionID),
 					zap.Error(err),
 				)
+				// Set paused flag if pause_on_error is enabled
+				if config.PauseOnError {
+					paused.Store(true)
+				}
 			} else {
 				state.State = pb.MigrationState_MIGRATION_COMPLETE
 				migration.CompletedPartitions++
 				mc.logger.Info("Partition migration completed",
 					zap.Uint32("partition_id", item.PartitionID),
+					zap.Duration("duration", time.Since(state.StartTime)),
 				)
 			}
 			migration.mu.Unlock()

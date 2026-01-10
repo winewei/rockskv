@@ -665,6 +665,9 @@ type MetadataServiceClient interface {
 	AcquirePartitionLease(ctx context.Context, in *AcquireLeaseRequest, opts ...grpc.CallOption) (*AcquireLeaseResponse, error)
 	RenewPartitionLease(ctx context.Context, in *RenewLeaseRequest, opts ...grpc.CallOption) (*RenewLeaseResponse, error)
 	RevokePartitionLease(ctx context.Context, in *RevokeLeaseRequest, opts ...grpc.CallOption) (*RevokeLeaseResponse, error)
+	// Node lifecycle APIs (Controlled Shutdown)
+	ShutdownNode(ctx context.Context, in *ShutdownNodeRequest, opts ...grpc.CallOption) (*ShutdownNodeResponse, error)
+	GetNodeStatus(ctx context.Context, in *GetNodeStatusRequest, opts ...grpc.CallOption) (*GetNodeStatusResponse, error)
 }
 
 type metadataServiceClient struct {
@@ -806,6 +809,24 @@ func (c *metadataServiceClient) RevokePartitionLease(ctx context.Context, in *Re
 	return out, nil
 }
 
+func (c *metadataServiceClient) ShutdownNode(ctx context.Context, in *ShutdownNodeRequest, opts ...grpc.CallOption) (*ShutdownNodeResponse, error) {
+	out := new(ShutdownNodeResponse)
+	err := c.cc.Invoke(ctx, "/rockskv.MetadataService/ShutdownNode", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *metadataServiceClient) GetNodeStatus(ctx context.Context, in *GetNodeStatusRequest, opts ...grpc.CallOption) (*GetNodeStatusResponse, error) {
+	out := new(GetNodeStatusResponse)
+	err := c.cc.Invoke(ctx, "/rockskv.MetadataService/GetNodeStatus", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MetadataServiceServer is the server API for MetadataService service.
 // All implementations must embed UnimplementedMetadataServiceServer
 // for forward compatibility
@@ -825,6 +846,9 @@ type MetadataServiceServer interface {
 	AcquirePartitionLease(context.Context, *AcquireLeaseRequest) (*AcquireLeaseResponse, error)
 	RenewPartitionLease(context.Context, *RenewLeaseRequest) (*RenewLeaseResponse, error)
 	RevokePartitionLease(context.Context, *RevokeLeaseRequest) (*RevokeLeaseResponse, error)
+	// Node lifecycle APIs (Controlled Shutdown)
+	ShutdownNode(context.Context, *ShutdownNodeRequest) (*ShutdownNodeResponse, error)
+	GetNodeStatus(context.Context, *GetNodeStatusRequest) (*GetNodeStatusResponse, error)
 	mustEmbedUnimplementedMetadataServiceServer()
 }
 
@@ -867,6 +891,12 @@ func (UnimplementedMetadataServiceServer) RenewPartitionLease(context.Context, *
 }
 func (UnimplementedMetadataServiceServer) RevokePartitionLease(context.Context, *RevokeLeaseRequest) (*RevokeLeaseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RevokePartitionLease not implemented")
+}
+func (UnimplementedMetadataServiceServer) ShutdownNode(context.Context, *ShutdownNodeRequest) (*ShutdownNodeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ShutdownNode not implemented")
+}
+func (UnimplementedMetadataServiceServer) GetNodeStatus(context.Context, *GetNodeStatusRequest) (*GetNodeStatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetNodeStatus not implemented")
 }
 func (UnimplementedMetadataServiceServer) mustEmbedUnimplementedMetadataServiceServer() {}
 
@@ -1100,6 +1130,42 @@ func _MetadataService_RevokePartitionLease_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MetadataService_ShutdownNode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShutdownNodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MetadataServiceServer).ShutdownNode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/rockskv.MetadataService/ShutdownNode",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MetadataServiceServer).ShutdownNode(ctx, req.(*ShutdownNodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MetadataService_GetNodeStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetNodeStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MetadataServiceServer).GetNodeStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/rockskv.MetadataService/GetNodeStatus",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MetadataServiceServer).GetNodeStatus(ctx, req.(*GetNodeStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MetadataService_ServiceDesc is the grpc.ServiceDesc for MetadataService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1150,6 +1216,14 @@ var MetadataService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RevokePartitionLease",
 			Handler:    _MetadataService_RevokePartitionLease_Handler,
+		},
+		{
+			MethodName: "ShutdownNode",
+			Handler:    _MetadataService_ShutdownNode_Handler,
+		},
+		{
+			MethodName: "GetNodeStatus",
+			Handler:    _MetadataService_GetNodeStatus_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
