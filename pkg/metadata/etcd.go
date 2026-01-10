@@ -7,6 +7,7 @@ import (
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
 	"go.uber.org/zap"
 
 	"github.com/winewei/rockskv/pkg/common"
@@ -20,15 +21,23 @@ const (
 	partitionPrefix = "/rockskv/partitions/"
 	migrationPrefix = "/rockskv/migrations/" // Separate storage for temporary migration state
 
+	// Lock keys
+	routeTableLockKey = "/rockskv/locks/route-table"
+
 	// Lease TTL for node registration and heartbeat
 	nodeLeaseTTL      = 30 // seconds
 	heartbeatLeaseTTL = 15 // seconds - shorter TTL for faster failure detection
+
+	// Session TTL for distributed lock
+	lockSessionTTL = 30 // seconds
 )
 
 // EtcdStore implements Store interface using etcd
 type EtcdStore struct {
-	client *clientv3.Client
-	logger *zap.Logger
+	client          *clientv3.Client
+	session         *concurrency.Session
+	routeTableMutex *concurrency.Mutex
+	logger          *zap.Logger
 }
 
 // EtcdConfig holds etcd configuration
@@ -66,9 +75,21 @@ func NewEtcdStore(config *EtcdConfig) (*EtcdStore, error) {
 	logger := common.NewLogger("etcd-store")
 	logger.Info("Connected to etcd", zap.Strings("endpoints", config.Endpoints))
 
+	// Create session for distributed lock
+	session, err := concurrency.NewSession(client, concurrency.WithTTL(lockSessionTTL))
+	if err != nil {
+		client.Close()
+		return nil, fmt.Errorf("failed to create etcd session: %w", err)
+	}
+
+	// Create mutex for route table updates
+	routeTableMutex := concurrency.NewMutex(session, routeTableLockKey)
+
 	store := &EtcdStore{
-		client: client,
-		logger: logger,
+		client:          client,
+		session:         session,
+		routeTableMutex: routeTableMutex,
+		logger:          logger,
 	}
 
 	// Start auto-compact in background (every 5 minutes)
@@ -210,10 +231,26 @@ func (s *EtcdStore) GetRouteTable(ctx context.Context) (*RouteTable, error) {
 	return &table, nil
 }
 
-// UpdateRouteTable updates the route table using optimistic locking
+// UpdateRouteTable updates the route table using distributed lock
 func (s *EtcdStore) UpdateRouteTable(ctx context.Context, table *RouteTable) error {
-	oldVersion := table.Version
-	table.Version++
+	// Acquire distributed lock
+	if err := s.routeTableMutex.Lock(ctx); err != nil {
+		return fmt.Errorf("failed to acquire route table lock: %w", err)
+	}
+	defer func() {
+		if err := s.routeTableMutex.Unlock(ctx); err != nil {
+			s.logger.Warn("Failed to release route table lock", zap.Error(err))
+		}
+	}()
+
+	// Read latest version under lock
+	current, err := s.GetRouteTable(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get current route table: %w", err)
+	}
+
+	// Update version
+	table.Version = current.Version + 1
 	table.UpdatedAt = time.Now()
 
 	data, err := json.Marshal(table)
@@ -221,51 +258,14 @@ func (s *EtcdStore) UpdateRouteTable(ctx context.Context, table *RouteTable) err
 		return fmt.Errorf("failed to marshal route table: %w", err)
 	}
 
-	// Use transaction with Compare-And-Swap to prevent concurrent updates
-	// This ensures that the version hasn't changed since we read it
-	txn := s.client.Txn(ctx)
-
-	// Get current version to compare
-	resp, err := s.client.Get(ctx, routeTableKey)
+	// Write to etcd (no CAS needed, we have the lock)
+	_, err = s.client.Put(ctx, routeTableKey, string(data))
 	if err != nil {
-		return fmt.Errorf("failed to get current route table: %w", err)
-	}
-
-	var cmp clientv3.Cmp
-	if len(resp.Kvs) == 0 {
-		// First time creating route table
-		cmp = clientv3.Compare(clientv3.Version(routeTableKey), "=", 0)
-	} else {
-		// Verify the version hasn't changed
-		var currentTable RouteTable
-		if err := json.Unmarshal(resp.Kvs[0].Value, &currentTable); err != nil {
-			return fmt.Errorf("failed to unmarshal current route table: %w", err)
-		}
-
-		if currentTable.Version != oldVersion {
-			return fmt.Errorf("route table version conflict: expected %d, got %d (another update happened)",
-				oldVersion, currentTable.Version)
-		}
-
-		// Compare by ModRevision to detect any changes
-		cmp = clientv3.Compare(clientv3.ModRevision(routeTableKey), "=", resp.Kvs[0].ModRevision)
-	}
-
-	// Execute transaction: if version matches, update; otherwise fail
-	txnResp, err := txn.If(cmp).
-		Then(clientv3.OpPut(routeTableKey, string(data))).
-		Commit()
-
-	if err != nil {
-		return fmt.Errorf("failed to commit route table transaction: %w", err)
-	}
-
-	if !txnResp.Succeeded {
-		return fmt.Errorf("route table update conflict: another update happened concurrently")
+		return fmt.Errorf("failed to put route table: %w", err)
 	}
 
 	s.logger.Info("Route table updated",
-		zap.Uint64("old_version", oldVersion),
+		zap.Uint64("old_version", current.Version),
 		zap.Uint64("new_version", table.Version))
 	common.RouteTableVersion.Set(float64(table.Version))
 
@@ -438,7 +438,12 @@ func (s *EtcdStore) DeleteMigrationState(ctx context.Context, partitionID uint32
 	return nil
 }
 
-// Close closes the etcd client
+// Close closes the etcd client and session
 func (s *EtcdStore) Close() error {
+	if s.session != nil {
+		if err := s.session.Close(); err != nil {
+			s.logger.Warn("Failed to close etcd session", zap.Error(err))
+		}
+	}
 	return s.client.Close()
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -360,42 +359,6 @@ func (r *Router) SetPartitionStatus(ctx context.Context, partitionID uint32, sta
 
 // SetPartitionMigration marks a partition as being migrated
 func (r *Router) SetPartitionMigration(ctx context.Context, partitionID uint32, targetNode string, state pb.MigrationState) error {
-	// Retry up to 5 times on version conflicts
-	maxRetries := 5
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		err := r.setPartitionMigrationOnce(ctx, partitionID, targetNode, state)
-		if err == nil {
-			return nil
-		}
-
-		// Check if it's a version conflict error
-		if attempt < maxRetries-1 && (strings.Contains(err.Error(), "version conflict") ||
-			strings.Contains(err.Error(), "update conflict")) {
-			// Reload route table and retry
-			r.logger.Warn("Route table conflict, retrying",
-				zap.Uint32("partition_id", partitionID),
-				zap.Int("attempt", attempt+1),
-			)
-			time.Sleep(time.Duration(attempt+1) * 50 * time.Millisecond)
-
-			// Reload latest route table
-			table, getErr := r.store.GetRouteTable(ctx)
-			if getErr != nil {
-				return fmt.Errorf("failed to reload route table: %w", getErr)
-			}
-			r.mu.Lock()
-			r.routeTable = table
-			r.mu.Unlock()
-			continue
-		}
-
-		return err
-	}
-
-	return fmt.Errorf("failed to set migration after %d retries", maxRetries)
-}
-
-func (r *Router) setPartitionMigrationOnce(ctx context.Context, partitionID uint32, targetNode string, state pb.MigrationState) error {
 	r.mu.RLock()
 	partition, ok := r.routeTable.Partitions[partitionID]
 	if !ok {
@@ -433,42 +396,6 @@ func (r *Router) setPartitionMigrationOnce(ctx context.Context, partitionID uint
 
 // CompleteMigration finalizes a partition migration
 func (r *Router) CompleteMigration(ctx context.Context, partitionID uint32, newNode string, isPrimary bool) error {
-	// Retry up to 5 times on version conflicts
-	maxRetries := 5
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		err := r.completeMigrationOnce(ctx, partitionID, newNode, isPrimary)
-		if err == nil {
-			return nil
-		}
-
-		// Check if it's a version conflict error
-		if attempt < maxRetries-1 && (err.Error() == "route table update conflict: another update happened concurrently" ||
-			strings.Contains(err.Error(), "version conflict")) {
-			// Reload route table and retry
-			r.logger.Warn("Route table conflict, retrying",
-				zap.Uint32("partition_id", partitionID),
-				zap.Int("attempt", attempt+1),
-			)
-			time.Sleep(time.Duration(attempt+1) * 50 * time.Millisecond)
-
-			// Reload latest route table
-			table, getErr := r.store.GetRouteTable(ctx)
-			if getErr != nil {
-				return fmt.Errorf("failed to reload route table: %w", getErr)
-			}
-			r.mu.Lock()
-			r.routeTable = table
-			r.mu.Unlock()
-			continue
-		}
-
-		return err
-	}
-
-	return fmt.Errorf("failed to complete migration after %d retries", maxRetries)
-}
-
-func (r *Router) completeMigrationOnce(ctx context.Context, partitionID uint32, newNode string, isPrimary bool) error {
 	// First, delete the migration state (cleanup temporary data)
 	if err := r.store.DeleteMigrationState(ctx, partitionID); err != nil {
 		r.logger.Warn("Failed to delete migration state (continuing anyway)",
