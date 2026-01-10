@@ -28,6 +28,10 @@ service MetadataService {
   rpc GetRouteTable(GetRouteTableRequest) returns (GetRouteTableResponse);
   rpc SubscribeRouteUpdates(SubscribeRequest) returns (stream RouteUpdate);
 
+  // Cluster lifecycle APIs
+  rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
+  rpc InitCluster(InitClusterRequest) returns (InitClusterResponse);
+
   // Migration APIs
   rpc TriggerRebalance(TriggerRebalanceRequest) returns (TriggerRebalanceResponse);
   rpc GetMigrationStatus(GetMigrationStatusRequest) returns (GetMigrationStatusResponse);
@@ -215,6 +219,12 @@ message PartitionInfo {
 
 // ========== 枚举类型 ==========
 
+enum ClusterState {
+  CLUSTER_PENDING = 0;      // Cluster just started, no partitions
+  CLUSTER_INITIALIZING = 1; // Partition allocation in progress
+  CLUSTER_RUNNING = 2;      // Partitions allocated, serving requests
+}
+
 enum NodeRole {
   STORAGE = 0;
   COMPUTE = 1;
@@ -289,4 +299,24 @@ message CancelMigrationRequest {
 message CancelMigrationResponse {
   bool success = 1;
   string message = 2;
+}
+
+// ========== Cluster Lifecycle 消息定义 ==========
+
+message GetClusterInfoRequest {}
+
+message GetClusterInfoResponse {
+  ClusterState state = 1;
+  int32 replica_count = 2;
+  int32 storage_node_count = 3;
+  int32 partition_count = 4;
+}
+
+message InitClusterRequest {}
+
+message InitClusterResponse {
+  bool success = 1;
+  string message = 2;
+  int32 partition_count = 3;
+  int32 node_count = 4;
 }

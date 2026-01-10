@@ -20,6 +20,7 @@ const (
 	routeTableKey   = "/rockskv/route_table"
 	partitionPrefix = "/rockskv/partitions/"
 	migrationPrefix = "/rockskv/migrations/" // Separate storage for temporary migration state
+	clusterInfoKey  = "/rockskv/cluster_info"
 
 	// Lock keys
 	routeTableLockKey = "/rockskv/locks/route-table"
@@ -30,6 +31,9 @@ const (
 
 	// Session TTL for distributed lock
 	lockSessionTTL = 30 // seconds
+
+	// Default replica count
+	defaultReplicaCount = 2
 )
 
 // EtcdStore implements Store interface using etcd
@@ -96,6 +100,56 @@ func NewEtcdStore(config *EtcdConfig) (*EtcdStore, error) {
 	go store.StartAutoCompact(context.Background(), 5*time.Minute)
 
 	return store, nil
+}
+
+// GetClusterInfo retrieves the cluster info
+func (s *EtcdStore) GetClusterInfo(ctx context.Context) (*ClusterInfo, error) {
+	resp, err := s.client.Get(ctx, clusterInfoKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get cluster info: %w", err)
+	}
+
+	if len(resp.Kvs) == 0 {
+		// Return default pending state if not initialized
+		return &ClusterInfo{
+			State:        ClusterStatePending,
+			ReplicaCount: defaultReplicaCount,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}, nil
+	}
+
+	var info ClusterInfo
+	if err := json.Unmarshal(resp.Kvs[0].Value, &info); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal cluster info: %w", err)
+	}
+
+	return &info, nil
+}
+
+// SetClusterState updates the cluster state
+func (s *EtcdStore) SetClusterState(ctx context.Context, state ClusterState) error {
+	// Get current info or create new
+	info, err := s.GetClusterInfo(ctx)
+	if err != nil {
+		return err
+	}
+
+	info.State = state
+	info.UpdatedAt = time.Now()
+
+	data, err := json.Marshal(info)
+	if err != nil {
+		return fmt.Errorf("failed to marshal cluster info: %w", err)
+	}
+
+	_, err = s.client.Put(ctx, clusterInfoKey, string(data))
+	if err != nil {
+		return fmt.Errorf("failed to put cluster info: %w", err)
+	}
+
+	s.logger.Info("Cluster state updated", zap.String("state", string(state)))
+	return nil
 }
 
 // RegisterNode registers a node with etcd

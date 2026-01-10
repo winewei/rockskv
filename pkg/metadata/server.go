@@ -381,7 +381,72 @@ func (s *Server) GetStore() Store {
 	return s.store
 }
 
+// GetClusterInfo implements MetadataService.GetClusterInfo
+func (s *Server) GetClusterInfo(ctx context.Context, req *pb.GetClusterInfoRequest) (*pb.GetClusterInfoResponse, error) {
+	info, err := s.store.GetClusterInfo(ctx)
+	if err != nil {
+		s.logger.Error("Failed to get cluster info", zap.Error(err))
+		return nil, err
+	}
+
+	nodes, err := s.store.ListNodes(ctx, NodeRoleStorage)
+	if err != nil {
+		s.logger.Error("Failed to list storage nodes", zap.Error(err))
+		return nil, err
+	}
+
+	table := s.router.GetRouteTable()
+
+	return &pb.GetClusterInfoResponse{
+		State:            convertClusterState(info.State),
+		ReplicaCount:     int32(info.ReplicaCount),
+		StorageNodeCount: int32(len(nodes)),
+		PartitionCount:   int32(len(table.Partitions)),
+	}, nil
+}
+
+// InitCluster implements MetadataService.InitCluster
+func (s *Server) InitCluster(ctx context.Context, req *pb.InitClusterRequest) (*pb.InitClusterResponse, error) {
+	if err := s.router.InitCluster(ctx); err != nil {
+		s.logger.Error("Failed to initialize cluster", zap.Error(err))
+		return &pb.InitClusterResponse{
+			Success: false,
+			Message: err.Error(),
+		}, nil
+	}
+
+	nodes, _ := s.store.ListNodes(ctx, NodeRoleStorage)
+	table := s.router.GetRouteTable()
+
+	s.logger.Info("Cluster initialized successfully",
+		zap.Int("partition_count", len(table.Partitions)),
+		zap.Int("node_count", len(nodes)),
+	)
+
+	return &pb.InitClusterResponse{
+		Success:        true,
+		Message:        "cluster initialized successfully",
+		PartitionCount: int32(len(table.Partitions)),
+		NodeCount:      int32(len(nodes)),
+	}, nil
+}
+
+// convertClusterState converts internal cluster state to protobuf
+func convertClusterState(state ClusterState) pb.ClusterState {
+	switch state {
+	case ClusterStatePending:
+		return pb.ClusterState_CLUSTER_PENDING
+	case ClusterStateInitializing:
+		return pb.ClusterState_CLUSTER_INITIALIZING
+	case ClusterStateRunning:
+		return pb.ClusterState_CLUSTER_RUNNING
+	default:
+		return pb.ClusterState_CLUSTER_PENDING
+	}
+}
+
 // InitializeCluster initializes the cluster with partition assignments
+// Deprecated: Use InitCluster RPC for proper two-phase initialization
 func (s *Server) InitializeCluster(ctx context.Context) error {
 	return s.router.InitializePartitions(ctx)
 }

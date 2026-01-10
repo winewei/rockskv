@@ -141,7 +141,111 @@ func (r *Router) notifySubscribers(table *RouteTable) {
 	}
 }
 
+// GetClusterState returns the current cluster state
+func (r *Router) GetClusterState(ctx context.Context) (ClusterState, error) {
+	info, err := r.store.GetClusterInfo(ctx)
+	if err != nil {
+		return "", err
+	}
+	return info.State, nil
+}
+
+// InitCluster initializes the cluster with partition allocation
+// This is the two-phase initialization: PENDING -> INITIALIZING -> RUNNING
+func (r *Router) InitCluster(ctx context.Context) error {
+	// Phase 1: Pre-checks
+	info, err := r.store.GetClusterInfo(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get cluster info: %w", err)
+	}
+
+	if info.State != ClusterStatePending {
+		return fmt.Errorf("cluster is not in PENDING state (current: %s)", info.State)
+	}
+
+	nodes, err := r.store.ListNodes(ctx, NodeRoleStorage)
+	if err != nil {
+		return fmt.Errorf("failed to list storage nodes: %w", err)
+	}
+
+	if len(nodes) < MinReplicaNodes {
+		return fmt.Errorf("need at least %d storage nodes, got %d", MinReplicaNodes, len(nodes))
+	}
+
+	// Check all nodes are online (have recent heartbeat)
+	for _, node := range nodes {
+		if node.Status != "online" {
+			return fmt.Errorf("node %s is not online (status: %s)", node.ID, node.Status)
+		}
+	}
+
+	// Phase 2: Set state to INITIALIZING
+	if err := r.store.SetClusterState(ctx, ClusterStateInitializing); err != nil {
+		return fmt.Errorf("failed to set cluster state to INITIALIZING: %w", err)
+	}
+
+	r.logger.Info("Cluster initialization started",
+		zap.Int("node_count", len(nodes)),
+	)
+
+	// Phase 3: Allocate partitions
+	if err := r.allocatePartitions(ctx, nodes); err != nil {
+		// Rollback to PENDING on failure
+		if rollbackErr := r.store.SetClusterState(ctx, ClusterStatePending); rollbackErr != nil {
+			r.logger.Error("Failed to rollback cluster state", zap.Error(rollbackErr))
+		}
+		return fmt.Errorf("failed to allocate partitions: %w", err)
+	}
+
+	// Phase 4: Set state to RUNNING
+	if err := r.store.SetClusterState(ctx, ClusterStateRunning); err != nil {
+		return fmt.Errorf("failed to set cluster state to RUNNING: %w", err)
+	}
+
+	r.logger.Info("Cluster initialization completed",
+		zap.Int("partition_count", TotalPartitions),
+		zap.Int("node_count", len(nodes)),
+	)
+
+	return nil
+}
+
+// allocatePartitions distributes partitions across storage nodes
+func (r *Router) allocatePartitions(ctx context.Context, nodes []*NodeInfo) error {
+	// Sort nodes by ID for consistent assignment
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].ID < nodes[j].ID
+	})
+
+	nodeCount := len(nodes)
+	table := NewRouteTable()
+
+	// Distribute partitions across nodes
+	for i := uint32(0); i < TotalPartitions; i++ {
+		primaryIdx := int(i) % nodeCount
+		replicaIdx := (primaryIdx + 1) % nodeCount
+
+		table.Partitions[i] = &PartitionInfo{
+			ID:      i,
+			Primary: nodes[primaryIdx].Addr,
+			Replica: nodes[replicaIdx].Addr,
+			Status:  PartitionStatusNormal,
+		}
+	}
+
+	table.UpdatedAt = time.Now()
+
+	// Save route table
+	if err := r.store.UpdateRouteTable(ctx, table); err != nil {
+		return fmt.Errorf("failed to save route table: %w", err)
+	}
+
+	r.updateRouteTable(table)
+	return nil
+}
+
 // InitializePartitions initializes partitions across available storage nodes
+// Deprecated: Use InitCluster for proper two-phase initialization
 func (r *Router) InitializePartitions(ctx context.Context) error {
 	nodes, err := r.store.ListNodes(ctx, NodeRoleStorage)
 	if err != nil {

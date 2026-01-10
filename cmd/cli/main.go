@@ -188,6 +188,12 @@ func main() {
 	case "migration-cancel", "mcancel":
 		runMigrationCancel(args[1:])
 
+	case "cluster-info", "info":
+		runClusterInfo(args[1:])
+
+	case "init-cluster", "init":
+		runInitCluster(args[1:])
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
 		printUsage()
@@ -216,6 +222,8 @@ func printUsage() {
 	fmt.Println("  benchmark [options]          Run benchmark")
 	fmt.Println()
 	fmt.Println("Cluster Commands:")
+	fmt.Println("  cluster-info                 Show cluster state and info")
+	fmt.Println("  init-cluster                 Initialize cluster partitions")
 	fmt.Println("  locate <key>                 Show partition and nodes for a key")
 	fmt.Println("  partitions [options]         Show partition distribution")
 	fmt.Println()
@@ -679,4 +687,84 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
 	}
 	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+}
+
+func runClusterInfo(args []string) {
+	fs := flag.NewFlagSet("cluster-info", flag.ExitOnError)
+	metadataAddr := fs.String("metadata", "localhost:9000", "Metadata service address")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to parse flags: %v\n", err)
+		return
+	}
+
+	client, conn, err := getMetadataClient(*metadataAddr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.GetClusterInfo(ctx, &pb.GetClusterInfoRequest{})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Cluster Information:")
+	fmt.Printf("  State:          %s\n", getClusterStateString(resp.State))
+	fmt.Printf("  Replica Count:  %d\n", resp.ReplicaCount)
+	fmt.Printf("  Storage Nodes:  %d\n", resp.StorageNodeCount)
+	fmt.Printf("  Partitions:     %d\n", resp.PartitionCount)
+}
+
+func runInitCluster(args []string) {
+	fs := flag.NewFlagSet("init-cluster", flag.ExitOnError)
+	metadataAddr := fs.String("metadata", "localhost:9000", "Metadata service address")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to parse flags: %v\n", err)
+		return
+	}
+
+	client, conn, err := getMetadataClient(*metadataAddr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	fmt.Println("Initializing cluster...")
+
+	resp, err := client.InitCluster(ctx, &pb.InitClusterRequest{})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if resp.Success {
+		fmt.Printf("Cluster initialized successfully!\n")
+		fmt.Printf("  Partitions: %d\n", resp.PartitionCount)
+		fmt.Printf("  Nodes:      %d\n", resp.NodeCount)
+	} else {
+		fmt.Fprintf(os.Stderr, "Initialization failed: %s\n", resp.Message)
+		os.Exit(1)
+	}
+}
+
+func getClusterStateString(state pb.ClusterState) string {
+	switch state {
+	case pb.ClusterState_CLUSTER_PENDING:
+		return "PENDING (waiting for init-cluster)"
+	case pb.ClusterState_CLUSTER_INITIALIZING:
+		return "INITIALIZING"
+	case pb.ClusterState_CLUSTER_RUNNING:
+		return "RUNNING"
+	default:
+		return "UNKNOWN"
+	}
 }

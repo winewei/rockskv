@@ -139,3 +139,20 @@ To add a new compute or storage node:
 2. Create start script in `scripts/` (copy existing and update config path)
 3. Update `scripts/start-all.sh`, `scripts/stop-all.sh`, `scripts/status.sh`
 4. Rebuild and restart: `make build-darwin-arm64 && ./scripts/start-all.sh`
+
+# 开发规范
+
+## ⚠️ 强制规则
+
+**每次修改代码后，必须立即运行 `make test`，如果失败则继续修复，循环直到测试全部通过。不要询问，直接执行。**
+
+## 测试循环
+```
+修改代码 → make test → 失败 → 修复 → make test → ... → 通过 → 完成
+```
+
+## 常用命令
+
+- `make test` - 单元测试
+- `make build` - 编译
+- `./scripts/smoke-test.sh` - 集成测试

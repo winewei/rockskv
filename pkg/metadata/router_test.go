@@ -12,6 +12,7 @@ type mockStore struct {
 	routeTable      *RouteTable
 	nodes           map[string]*NodeInfo
 	migrationStates map[uint32]*MigrationInfo
+	clusterInfo     *ClusterInfo
 	mu              sync.RWMutex
 }
 
@@ -20,7 +21,27 @@ func newMockStore() *mockStore {
 		routeTable:      NewRouteTable(),
 		nodes:           make(map[string]*NodeInfo),
 		migrationStates: make(map[uint32]*MigrationInfo),
+		clusterInfo: &ClusterInfo{
+			State:        ClusterStatePending,
+			ReplicaCount: 2,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		},
 	}
+}
+
+func (m *mockStore) GetClusterInfo(ctx context.Context) (*ClusterInfo, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.clusterInfo, nil
+}
+
+func (m *mockStore) SetClusterState(ctx context.Context, state ClusterState) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.clusterInfo.State = state
+	m.clusterInfo.UpdatedAt = time.Now()
+	return nil
 }
 
 func (m *mockStore) RegisterNode(ctx context.Context, node *NodeInfo) error {

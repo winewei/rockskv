@@ -9,6 +9,10 @@ import (
 
 // Store defines the interface for metadata storage
 type Store interface {
+	// Cluster state operations
+	GetClusterInfo(ctx context.Context) (*ClusterInfo, error)
+	SetClusterState(ctx context.Context, state ClusterState) error
+
 	// Node operations
 	RegisterNode(ctx context.Context, node *NodeInfo) error
 	UnregisterNode(ctx context.Context, nodeID string) error
@@ -33,6 +37,23 @@ type Store interface {
 
 	// Close closes the store
 	Close() error
+}
+
+// ClusterState represents the state of the cluster
+type ClusterState string
+
+const (
+	ClusterStatePending      ClusterState = "pending"      // Cluster just started, no partitions
+	ClusterStateInitializing ClusterState = "initializing" // Partition allocation in progress
+	ClusterStateRunning      ClusterState = "running"      // Partitions allocated, serving requests
+)
+
+// ClusterInfo contains cluster-level information
+type ClusterInfo struct {
+	State       ClusterState `json:"state"`
+	ReplicaCount int         `json:"replica_count"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
 }
 
 // NodeRole represents the role of a node
