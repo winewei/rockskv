@@ -1,5 +1,9 @@
 # RocksKV
 
+[![Go Version](https://img.shields.io/badge/Go-1.24%2B-00ADD8?logo=go)](https://go.dev/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](VERSION)
+
 基于 RocksDB 的存算分离分布式 KV 数据库，作为 DynamoDB 的低成本替代方案。
 
 ## 核心特性
@@ -82,9 +86,18 @@
 
 ### 环境要求
 
-- Go 1.21+
-- etcd 3.5+（本地开发）
-- macOS (Intel/Apple Silicon) 或 Linux (x86_64/ARM64)
+| 组件 | 版本要求 |
+|------|---------|
+| **Go** | 1.24.0+ |
+| **etcd** | 3.5.11+ (推荐 v3.5.12) |
+| **protoc** | 3.19.0+ (仅开发需要) |
+| **Docker** | 20.10+ (可选) |
+
+**支持平台**:
+- macOS (Intel/Apple Silicon)
+- Linux (x86_64/ARM64)
+
+详细依赖列表请查看 [DEPENDENCIES.md](DEPENDENCIES.md)
 
 ### 安装
 
@@ -424,7 +437,9 @@ curl localhost:8090/metrics  # compute-1
 ## 文档
 
 - [CLAUDE.md](CLAUDE.md) - Claude Code 开发指南
+- [DEPENDENCIES.md](DEPENDENCIES.md) - 依赖版本和兼容性
 - [docs/ETCD_OPTIMIZATION.md](docs/ETCD_OPTIMIZATION.md) - etcd 优化设计文档
+- [VERSION](VERSION) - 当前项目版本
 
 ## 贡献
 

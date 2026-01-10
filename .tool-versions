@@ -1,0 +1,4 @@
+# asdf tool versions file
+# Install asdf: https://asdf-vm.com/
+
+golang 1.24.0
