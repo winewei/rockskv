@@ -1,0 +1,19 @@
+# Storage Node 3 Configuration - Docker Deployment
+node_id: "storage-3"
+listen_addr: ":9003"
+metadata_addr: "metadata:9000"
+metrics_addr: ":9093"
+sst_dir: "/data/sst"
+
+# RocksDB Configuration
+rocksdb:
+  data_dir: "/data/db"
+  wal_dir: "/data/wal"
+  block_cache_size: 268435456    # 256MB
+  write_buffer_size: 33554432    # 32MB
+  max_write_buffer_number: 2
+  max_background_compactions: 2
+  max_background_flushes: 1
+  target_file_size_base: 33554432
+  max_bytes_for_level_base: 134217728
+  compression_type: "lz4"

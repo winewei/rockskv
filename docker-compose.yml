@@ -1,6 +1,32 @@
+# RocksKV Multi-Node Cluster Docker Compose
+#
+# This configuration provides a complete distributed cluster:
+# - 1 etcd node (metadata backend)
+# - 1 metadata service (route management)
+# - 3 storage nodes (data storage with replication)
+# - 2 compute nodes (stateless query routing)
+#
+# Quick Start:
+#   docker-compose up -d
+#   docker-compose exec cli rockskv-cli put hello world
+#   docker-compose exec cli rockskv-cli get hello
+#
+# Scale storage nodes:
+#   docker-compose up -d --scale storage=5
+#
+# View logs:
+#   docker-compose logs -f metadata
+#   docker-compose logs -f storage-1
+#
+# Stop and cleanup:
+#   docker-compose down -v
+
 version: '3.8'
 
 services:
+  # =============================================================================
+  # etcd - Distributed key-value store for metadata
+  # =============================================================================
   etcd:
     image: quay.io/coreos/etcd:v3.5.12
     container_name: rockskv-etcd
@@ -15,79 +41,204 @@ services:
       - "2379:2379"
     volumes:
       - etcd-data:/etcd-data
+    networks:
+      - rockskv-net
     healthcheck:
       test: ["CMD", "etcdctl", "endpoint", "health"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
-  # metadata:
-  #   build:
-  #     context: .
-  #     dockerfile: deploy/Dockerfile.metadata
-  #   container_name: rockskv-metadata
-  #   ports:
-  #     - "9000:9000"
-  #   depends_on:
-  #     etcd:
-  #       condition: service_healthy
-  #   environment:
-  #     - ROCKSKV_NODE_ID=metadata-1
-  #     - ROCKSKV_LISTEN_ADDR=:9000
-  #     - ROCKSKV_ETCD_ENDPOINTS=etcd:2379
-  #   healthcheck:
-  #     test: ["CMD", "nc", "-z", "localhost", "9000"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
+  # =============================================================================
+  # Metadata Service - Route table management, node registration
+  # =============================================================================
+  metadata:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.metadata
+    container_name: rockskv-metadata
+    ports:
+      - "9000:9000"
+      - "9090:9090"  # Metrics
+    depends_on:
+      etcd:
+        condition: service_healthy
+    volumes:
+      - ./config/docker/metadata.yaml:/etc/rockskv/metadata.yaml:ro
+    networks:
+      - rockskv-net
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9000 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
 
-  # storage:
-  #   build:
-  #     context: .
-  #     dockerfile: deploy/Dockerfile.storage
-  #   container_name: rockskv-storage
-  #   ports:
-  #     - "9001:9001"
-  #   depends_on:
-  #     metadata:
-  #       condition: service_healthy
-  #   environment:
-  #     - ROCKSKV_NODE_ID=storage-1
-  #     - ROCKSKV_LISTEN_ADDR=:9001
-  #     - ROCKSKV_METADATA_ADDR=metadata:9000
-  #     - ROCKSKV_DATA_DIR=/data
-  #     - ROCKSKV_WAL_DIR=/data/wal
-  #     - ROCKSKV_SST_DIR=/data/sst
-  #   volumes:
-  #     - storage-data:/data
-  #   healthcheck:
-  #     test: ["CMD", "nc", "-z", "localhost", "9001"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
+  # =============================================================================
+  # Storage Nodes - RocksDB-based data storage with partition management
+  # =============================================================================
+  storage-1:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.storage
+    container_name: rockskv-storage-1
+    ports:
+      - "9001:9001"
+      - "9091:9091"  # Metrics
+    depends_on:
+      metadata:
+        condition: service_healthy
+    volumes:
+      - ./config/docker/storage-1.yaml:/etc/rockskv/storage.yaml:ro
+      - storage-1-data:/data
+    networks:
+      - rockskv-net
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9001 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
 
-  # compute:
-  #   build:
-  #     context: .
-  #     dockerfile: deploy/Dockerfile.compute
-  #   container_name: rockskv-compute
-  #   ports:
-  #     - "8000:8000"
-  #   depends_on:
-  #     metadata:
-  #       condition: service_healthy
-  #     storage:
-  #       condition: service_healthy
-  #   environment:
-  #     - ROCKSKV_NODE_ID=compute-1
-  #     - ROCKSKV_LISTEN_ADDR=:8000
-  #     - ROCKSKV_METADATA_ADDR=metadata:9000
-  #   healthcheck:
-  #     test: ["CMD", "nc", "-z", "localhost", "8000"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
+  storage-2:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.storage
+    container_name: rockskv-storage-2
+    ports:
+      - "9002:9002"
+      - "9092:9092"  # Metrics
+    depends_on:
+      metadata:
+        condition: service_healthy
+    volumes:
+      - ./config/docker/storage-2.yaml:/etc/rockskv/storage.yaml:ro
+      - storage-2-data:/data
+    networks:
+      - rockskv-net
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9002 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
 
+  storage-3:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.storage
+    container_name: rockskv-storage-3
+    ports:
+      - "9003:9003"
+      - "9093:9093"  # Metrics
+    depends_on:
+      metadata:
+        condition: service_healthy
+    volumes:
+      - ./config/docker/storage-3.yaml:/etc/rockskv/storage.yaml:ro
+      - storage-3-data:/data
+    networks:
+      - rockskv-net
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9003 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # =============================================================================
+  # Compute Nodes - Stateless routing layer
+  # =============================================================================
+  compute-1:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.compute
+    container_name: rockskv-compute-1
+    ports:
+      - "8000:8000"
+      - "8090:8090"  # Metrics
+    depends_on:
+      metadata:
+        condition: service_healthy
+      storage-1:
+        condition: service_healthy
+      storage-2:
+        condition: service_healthy
+    volumes:
+      - ./config/docker/compute-1.yaml:/etc/rockskv/compute.yaml:ro
+    networks:
+      - rockskv-net
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8000 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  compute-2:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.compute
+    container_name: rockskv-compute-2
+    ports:
+      - "8001:8001"
+      - "8091:8091"  # Metrics
+    depends_on:
+      metadata:
+        condition: service_healthy
+      storage-1:
+        condition: service_healthy
+      storage-2:
+        condition: service_healthy
+    volumes:
+      - ./config/docker/compute-2.yaml:/etc/rockskv/compute.yaml:ro
+    networks:
+      - rockskv-net
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8001 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # =============================================================================
+  # CLI - Interactive client for testing
+  # =============================================================================
+  cli:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.cli
+    container_name: rockskv-cli
+    depends_on:
+      compute-1:
+        condition: service_healthy
+    environment:
+      - ROCKSKV_ADDR=compute-1:8000
+    networks:
+      - rockskv-net
+    stdin_open: true
+    tty: true
+    restart: "no"
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  rockskv-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# =============================================================================
+# Volumes
+# =============================================================================
 volumes:
   etcd-data:
-  storage-data:
+    driver: local
+  storage-1-data:
+    driver: local
+  storage-2-data:
+    driver: local
+  storage-3-data:
+    driver: local

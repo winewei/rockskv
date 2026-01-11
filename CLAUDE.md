@@ -154,7 +154,63 @@ make proto              # Regenerate protobuf code (requires protoc)
 
 Proto definitions are in `proto/rockskv.proto`, generated Go code goes to `pkg/proto/`.
 
-## Running Locally
+## Quick Start with Docker
+
+The fastest way to try RocksKV is using Docker Compose, which starts a complete multi-node cluster:
+
+```bash
+# Start the full cluster (1 etcd + 1 metadata + 3 storage + 2 compute nodes)
+docker-compose up -d
+
+# Wait for all services to be healthy (about 30 seconds)
+docker-compose ps
+
+# Use the CLI to interact with the cluster
+docker-compose exec cli rockskv-cli put hello world
+docker-compose exec cli rockskv-cli get hello
+# Output: world
+
+docker-compose exec cli rockskv-cli put user:1 '{"name":"Alice","age":30}'
+docker-compose exec cli rockskv-cli get user:1
+
+# View cluster status
+docker-compose exec cli rockskv-cli routes
+
+# View service logs
+docker-compose logs -f metadata
+docker-compose logs -f storage-1
+
+# Stop and cleanup
+docker-compose down -v
+```
+
+**Docker Cluster Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Docker Network                            │
+│                                                                  │
+│  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐     │
+│  │ compute-1│   │ compute-2│   │   cli    │   │   etcd   │     │
+│  │  :8000   │   │  :8001   │   │          │   │  :2379   │     │
+│  └────┬─────┘   └────┬─────┘   └──────────┘   └────┬─────┘     │
+│       │              │                              │           │
+│       └──────────────┼──────────────────────────────┼───────┐   │
+│                      │                              │       │   │
+│  ┌───────────────────┴───────────────────┐    ┌─────┴─────┐ │   │
+│  │              metadata:9000             │◄───│   etcd    │ │   │
+│  └───────────────────┬───────────────────┘    └───────────┘ │   │
+│                      │                                       │   │
+│       ┌──────────────┼──────────────┐                       │   │
+│       ▼              ▼              ▼                       │   │
+│  ┌─────────┐   ┌─────────┐   ┌─────────┐                   │   │
+│  │storage-1│   │storage-2│   │storage-3│                   │   │
+│  │  :9001  │   │  :9002  │   │  :9003  │                   │   │
+│  └─────────┘   └─────────┘   └─────────┘                   │   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Running Locally (Without Docker)
 
 ```bash
 # Start etcd first (via Docker)
@@ -178,6 +234,7 @@ docker-compose up -d etcd
 | Metadata | 9000 | 9090 |
 | Storage-1 | 9001 | 9091 |
 | Storage-2 | 9002 | 9092 |
+| Storage-3 | 9003 | 9093 |
 | Compute-1 | 8000 | 8090 |
 | Compute-2 | 8001 | 8091 |
 

@@ -1,0 +1,10 @@
+# Metadata Service Configuration - Docker Deployment
+node_id: "metadata-1"
+listen_addr: ":9000"
+metrics_addr: ":9090"
+
+# etcd Configuration
+etcd:
+  endpoints:
+    - "etcd:2379"
+  dial_timeout: "5s"
