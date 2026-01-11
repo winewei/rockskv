@@ -542,7 +542,7 @@ func (s *Server) IngestSST(stream pb.StorageService_IngestSSTServer) error {
 	var sstPath string
 	var file *os.File
 	var keysIngested int64
-	var partitionId uint32
+	var partitionID uint32
 	var hasData bool
 
 	for {
@@ -554,18 +554,18 @@ func (s *Server) IngestSST(stream pb.StorageService_IngestSSTServer) error {
 			return err
 		}
 
-		if partitionId == 0 && chunk.PartitionId != 0 {
-			partitionId = chunk.PartitionId
+		if partitionID == 0 && chunk.PartitionId != 0 {
+			partitionID = chunk.PartitionId
 		}
 
 		// Handle empty partition migration
 		if chunk.IsLast && len(chunk.Data) == 0 && !hasData {
 			s.logger.Info("Received empty partition migration",
-				zap.Uint32("partition_id", partitionId),
+				zap.Uint32("partition_id", partitionID),
 			)
 			// Empty partition - just add to partition manager
-			if partitionId != 0 && !s.partitionManager.HasPartition(partitionId) {
-				if err := s.partitionManager.AddPartition(partitionId, false); err != nil {
+			if partitionID != 0 && !s.partitionManager.HasPartition(partitionID) {
+				if err := s.partitionManager.AddPartition(partitionID, false); err != nil {
 					s.logger.Warn("Failed to add empty partition", zap.Error(err))
 				}
 			}
