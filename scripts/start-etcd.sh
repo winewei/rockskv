@@ -39,22 +39,30 @@ echo "  Log file: $ETCD_LOG_FILE"
 echo "  Client URL: http://localhost:2379"
 echo ""
 
+# Save variable values before unsetting
+DATA_DIR="$ETCD_DATA_DIR"
+PID_FILE="$ETCD_PID_FILE"
+LOG_FILE="$ETCD_LOG_FILE"
+
+# Unset environment variables to avoid conflicts with command-line flags
+unset ETCD_DATA_DIR ETCD_PID_FILE ETCD_LOG_FILE
+
 # Start etcd in background and save PID
 etcd \
-    --data-dir "$ETCD_DATA_DIR" \
+    --data-dir "$DATA_DIR" \
     --listen-client-urls http://localhost:2379 \
     --advertise-client-urls http://localhost:2379 \
     --listen-peer-urls http://localhost:2380 \
-    > "$ETCD_LOG_FILE" 2>&1 &
+    > "$LOG_FILE" 2>&1 &
 
-echo $! > "$ETCD_PID_FILE"
+echo $! > "$PID_FILE"
 
 # Wait a bit and verify it's running
 sleep 1
-if ! kill -0 "$(cat "$ETCD_PID_FILE")" 2>/dev/null; then
-    echo "❌ etcd failed to start. Check $ETCD_LOG_FILE"
-    rm -f "$ETCD_PID_FILE"
+if ! kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+    echo "❌ etcd failed to start. Check $LOG_FILE"
+    rm -f "$PID_FILE"
     exit 1
 fi
 
-echo "✅ etcd started successfully (PID: $(cat "$ETCD_PID_FILE"))"
+echo "✅ etcd started successfully (PID: $(cat "$PID_FILE"))"

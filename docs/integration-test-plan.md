@@ -13,10 +13,10 @@ Integration Tests
 │   ├── primary_check_test.go           ✅ 主副本检查
 │   └── epoch_fencing_test.go           ✅ Epoch 防护
 │
-├── Metadata Layer (部分完成 🚧)
+├── Metadata Layer (已完成 ✅)
 │   ├── ha_integration_test.go          ✅ Leader 选举、failover (7个测试)
 │   ├── route_table_integration_test.go ✅ 路由表持久化、订阅 (5个测试)
-│   └── node_registration_test.go       ❌ 节点注册、心跳
+│   └── node_registration_integration_test.go ✅ 节点注册、心跳 (5个测试)
 │
 ├── Migration (待补充)
 │   └── migration_integration_test.go   ❌ SST 导出/导入、状态机
@@ -81,18 +81,31 @@ Integration Tests
 
 ---
 
-### 3. 节点注册集成测试 (node_registration_test.go)
+### 3. 节点注册集成测试 (node_registration_integration_test.go) ✅
+
+**状态**: ✅ 已完成 (2026-01-12)
 
 **测试用例**：
-- [ ] TestNodeRegistration：Storage 节点注册到 Metadata
-- [ ] TestHeartbeat：心跳保持节点状态
-- [ ] TestNodeTimeout：心跳停止后节点标记为 DOWN
-- [ ] TestNodeRejoin：DOWN 节点重新加入
+- [x] TestNodeRegistration：Storage 节点注册到 Metadata，验证节点信息持久化
+- [x] TestHeartbeat：心跳机制保持节点状态，验证 TTL lease
+- [x] TestNodeTimeout：心跳停止后节点标记为 OFFLINE，failover 自动触发
+- [x] TestNodeRejoin：OFFLINE 节点重新发送心跳后恢复
+- [x] TestNodeStatusTransitions：节点状态转换（online → draining → offline → removed）
+
+**测试结果**：
+- 5 个测试全部通过
+- 执行时间：~3.5 秒
+- 覆盖场景：节点注册、心跳 TTL、failover、节点恢复、状态转换
+
+**关键实现**：
+- 直接测试 Store 层而不是 gRPC Server 层，简化测试
+- 使用 FailoverManager 验证心跳超时和故障转移
+- 使用 cleanupEtcdForNodeTests() 确保测试隔离
+- 验证 etcd 中的心跳键使用 15 秒 TTL lease
 
 **依赖**：
-- etcd
-- 1 个 Metadata 节点
-- 1 个 Storage 节点
+- etcd (localhost:2379)
+- EtcdStore、Router、FailoverManager 组件
 
 ---
 
@@ -206,10 +219,10 @@ test-integration-e2e:
 - [ ] 创建 test/testcluster 包（TestCluster helper） - 待实施
 - [x] 更新 Makefile 支持多包集成测试 - ✅ 已完成
 
-### Phase 2：Metadata 测试 🚧 (进行中)
+### Phase 2：Metadata 测试 ✅ (已完成)
 - [x] ha_integration_test.go - ✅ 已完成 (7个测试)
 - [x] route_table_integration_test.go - ✅ 已完成 (5个测试，1个跳过)
-- [ ] node_registration_test.go - 待实施
+- [x] node_registration_integration_test.go - ✅ 已完成 (5个测试)
 
 ### Phase 3：Migration 测试 (待开始)
 - [ ] migration_integration_test.go - 待实施
@@ -228,21 +241,22 @@ test-integration-e2e:
 - ✅ Storage Layer: 3 个测试文件，7 个集成测试
 - ✅ Metadata HA: 1 个测试文件，7 个集成测试
 - ✅ Metadata Route Table: 1 个测试文件，5 个集成测试（4个通过，1个跳过）
+- ✅ Metadata Node Registration: 1 个测试文件，5 个集成测试
 - ✅ Makefile 更新：支持 ./pkg/storage/... 和 ./pkg/metadata/...
+- ✅ etcd 启动脚本优化：统一 PID 管理，fail-fast 连接验证
 
 **测试统计**：
-- 总测试文件：5 个
-- 总测试用例：19 个（18个通过，1个跳过）
-- 执行时间：~37 秒（包含 etcd 启动和清理）
+- 总测试文件：6 个
+- 总测试用例：24 个（23个通过，1个跳过）
+- 执行时间：~42 秒（包含 etcd 启动和清理）
 - 成功率：100%（跳过的测试待后续实现）
 
 **待实施**：
-- ❌ 节点注册集成测试
 - ❌ 分区迁移集成测试
 - ❌ Compute-Storage 集成测试
 - ❌ E2E 集成测试
 
-**进度**：19 / 30+ (约 63% 完成)
+**进度**：24 / 30+ (约 80% 完成)
 
 ---
 

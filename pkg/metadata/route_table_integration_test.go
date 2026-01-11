@@ -13,7 +13,6 @@ import (
 
 // cleanupEtcd cleans up etcd data before tests
 func cleanupEtcd(t *testing.T) {
-	ctx := context.Background()
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   []string{testEtcdEndpoint},
 		DialTimeout: 5 * time.Second,
@@ -23,8 +22,23 @@ func cleanupEtcd(t *testing.T) {
 	}
 	defer client.Close()
 
-	// Delete all rockskv data
-	client.Delete(ctx, "/rockskv/", clientv3.WithPrefix())
+	// Fail-fast: Immediately verify the connection is working
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	_, err = client.Status(ctx, testEtcdEndpoint)
+	if err != nil {
+		t.Fatalf("Failed to connect to etcd (is etcd running?): %v", err)
+	}
+
+	// Delete all rockskv data with timeout
+	deleteCtx, deleteCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer deleteCancel()
+
+	_, err = client.Delete(deleteCtx, "/rockskv/", clientv3.WithPrefix())
+	if err != nil {
+		t.Fatalf("Failed to cleanup etcd: %v", err)
+	}
 }
 
 // TestRouteTablePersistence verifies that route table is correctly persisted to etcd
