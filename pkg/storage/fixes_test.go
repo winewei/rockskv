@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -254,5 +255,180 @@ func TestGetPartitionFieldPrefix(t *testing.T) {
 	}
 	if bytes.HasPrefix(otherPartitionKey, prefix) {
 		t.Error("Field key from other partition should not have this prefix")
+	}
+}
+
+// Test CommandEntry encode/decode round-trip (regression test)
+func TestCommandEntryEncodeDecodeRoundTrip(t *testing.T) {
+	entry := &CommandEntry{
+		Sequence:  12345,
+		Timestamp: 1234567890,
+		CmdType:   CmdTypePut,
+		KeyLen:    5,
+		ValueLen:  6,
+		Key:       []byte("mykey"),
+		Value:     []byte("mydata"),
+	}
+
+	// Encode
+	encoded := entry.Encode()
+
+	// Decode
+	reader := bytes.NewReader(encoded)
+	decoded, err := DecodeCommandEntry(reader)
+	if err != nil {
+		t.Fatalf("DecodeCommandEntry failed: %v", err)
+	}
+
+	// Verify all fields match
+	if decoded.Sequence != entry.Sequence {
+		t.Errorf("Sequence mismatch: expected %d, got %d", entry.Sequence, decoded.Sequence)
+	}
+	if decoded.Timestamp != entry.Timestamp {
+		t.Errorf("Timestamp mismatch: expected %d, got %d", entry.Timestamp, decoded.Timestamp)
+	}
+	if decoded.CmdType != entry.CmdType {
+		t.Errorf("CmdType mismatch: expected %d, got %d", entry.CmdType, decoded.CmdType)
+	}
+	if !bytes.Equal(decoded.Key, entry.Key) {
+		t.Errorf("Key mismatch: expected %v, got %v", entry.Key, decoded.Key)
+	}
+	if !bytes.Equal(decoded.Value, entry.Value) {
+		t.Errorf("Value mismatch: expected %v, got %v", entry.Value, decoded.Value)
+	}
+}
+
+// Test CRC mismatch detection with corrupted byte
+func TestCommandEntryCRCMismatch(t *testing.T) {
+	entry := &CommandEntry{
+		Sequence:  100,
+		Timestamp: 9999999,
+		CmdType:   CmdTypePut,
+		KeyLen:    4,
+		ValueLen:  5,
+		Key:       []byte("test"),
+		Value:     []byte("value"),
+	}
+
+	// Encode valid entry
+	encoded := entry.Encode()
+
+	// Corrupt a byte in the value section (flip a bit)
+	// Value starts at: 8 (seq) + 8 (ts) + 1 (type) + 4 (keyLen) + 4 (valueLen) + 4 (key) = 29
+	valueOffset := 8 + 8 + 1 + 4 + 4 + len(entry.Key)
+	encoded[valueOffset] ^= 0xFF // Flip all bits of first value byte
+
+	// Decode should fail with CRC mismatch
+	reader := bytes.NewReader(encoded)
+	_, err := DecodeCommandEntry(reader)
+	if err == nil {
+		t.Fatal("Expected CRC mismatch error for corrupted entry, got nil")
+	}
+	if !strings.Contains(err.Error(), "CRC mismatch") {
+		t.Errorf("Expected CRC mismatch error, got: %v", err)
+	}
+}
+
+// Test truncated log - missing CRC bytes
+func TestCommandEntryTruncatedCRC(t *testing.T) {
+	entry := &CommandEntry{
+		Sequence:  200,
+		Timestamp: 1111111,
+		CmdType:   CmdTypeDelete,
+		KeyLen:    3,
+		ValueLen:  0,
+		Key:       []byte("abc"),
+		Value:     nil,
+	}
+
+	// Encode valid entry
+	encoded := entry.Encode()
+
+	// Truncate: remove last 4 bytes (CRC)
+	truncated := encoded[:len(encoded)-4]
+
+	reader := bytes.NewReader(truncated)
+	_, err := DecodeCommandEntry(reader)
+	if err == nil {
+		t.Fatal("Expected error for truncated CRC, got nil")
+	}
+}
+
+// Test truncated log - missing value bytes
+func TestCommandEntryTruncatedValue(t *testing.T) {
+	entry := &CommandEntry{
+		Sequence:  300,
+		Timestamp: 2222222,
+		CmdType:   CmdTypePut,
+		KeyLen:    4,
+		ValueLen:  10,
+		Key:       []byte("key1"),
+		Value:     []byte("0123456789"),
+	}
+
+	// Encode valid entry
+	encoded := entry.Encode()
+
+	// Truncate: remove half of value + CRC (keeping header + key + 5 bytes of value)
+	// header = 25 bytes, key = 4 bytes, value should be 10 bytes
+	truncated := encoded[:25+4+5] // Missing 5 value bytes and 4 CRC bytes
+
+	reader := bytes.NewReader(truncated)
+	_, err := DecodeCommandEntry(reader)
+	if err == nil {
+		t.Fatal("Expected error for truncated value, got nil")
+	}
+}
+
+// Test truncated log - missing header bytes
+func TestCommandEntryTruncatedHeader(t *testing.T) {
+	entry := &CommandEntry{
+		Sequence:  400,
+		Timestamp: 3333333,
+		CmdType:   CmdTypePut,
+		KeyLen:    2,
+		ValueLen:  3,
+		Key:       []byte("ab"),
+		Value:     []byte("xyz"),
+	}
+
+	// Encode valid entry
+	encoded := entry.Encode()
+
+	// Truncate to just 10 bytes (partial header)
+	truncated := encoded[:10]
+
+	reader := bytes.NewReader(truncated)
+	_, err := DecodeCommandEntry(reader)
+	if err == nil {
+		t.Fatal("Expected error for truncated header, got nil")
+	}
+}
+
+// Test ComputeEntryCRC is consistent with Encode
+func TestComputeEntryCRCConsistency(t *testing.T) {
+	entry := &CommandEntry{
+		Sequence:  500,
+		Timestamp: 4444444,
+		CmdType:   CmdTypePut,
+		KeyLen:    6,
+		ValueLen:  7,
+		Key:       []byte("keysix"),
+		Value:     []byte("val7777"),
+	}
+
+	// Encode (which calculates CRC internally)
+	encoded := entry.Encode()
+
+	// Build header manually to match what DecodeCommandEntry reads
+	header := make([]byte, 8+8+1+4+4)
+	copy(header, encoded[:25])
+
+	// Compute CRC using pure function
+	computedCRC := ComputeEntryCRC(header, entry.Key, entry.Value)
+
+	// Entry's CRC should match computed CRC
+	if entry.CRC != computedCRC {
+		t.Errorf("CRC mismatch: Encode set %x, ComputeEntryCRC returned %x", entry.CRC, computedCRC)
 	}
 }

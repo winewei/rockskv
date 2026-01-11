@@ -79,6 +79,20 @@ func (e *CommandEntry) Encode() []byte {
 	return buf
 }
 
+// ComputeEntryCRC computes CRC32 checksum for header+key+value bytes (pure function)
+func ComputeEntryCRC(header, key, value []byte) uint32 {
+	// CRC is computed over: header + key + value (not including CRC field itself)
+	size := len(header) + len(key) + len(value)
+	buf := make([]byte, size)
+	offset := 0
+	copy(buf[offset:], header)
+	offset += len(header)
+	copy(buf[offset:], key)
+	offset += len(key)
+	copy(buf[offset:], value)
+	return crc32.ChecksumIEEE(buf)
+}
+
 // DecodeCommandEntry deserializes a command entry from reader
 func DecodeCommandEntry(r io.Reader) (*CommandEntry, error) {
 	header := make([]byte, 8+8+1+4+4) // seq + ts + type + keyLen + valueLen
@@ -108,20 +122,20 @@ func DecodeCommandEntry(r io.Reader) (*CommandEntry, error) {
 		}
 	}
 
-	// Read and verify CRC
+	// Read stored CRC
 	crcBuf := make([]byte, 4)
 	if _, err := io.ReadFull(r, crcBuf); err != nil {
 		return nil, err
 	}
-	e.CRC = binary.BigEndian.Uint32(crcBuf)
+	storedCRC := binary.BigEndian.Uint32(crcBuf)
 
-	// Verify CRC
-	encoded := e.Encode()
-	expectedCRC := binary.BigEndian.Uint32(encoded[len(encoded)-4:])
-	if e.CRC != expectedCRC {
-		return nil, fmt.Errorf("CRC mismatch: got %x, expected %x", e.CRC, expectedCRC)
+	// Compute expected CRC from raw bytes (pure function, no mutation)
+	expectedCRC := ComputeEntryCRC(header, e.Key, e.Value)
+	if storedCRC != expectedCRC {
+		return nil, fmt.Errorf("CRC mismatch: stored %x, computed %x", storedCRC, expectedCRC)
 	}
 
+	e.CRC = storedCRC
 	return e, nil
 }
 
