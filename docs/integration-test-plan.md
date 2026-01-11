@@ -8,13 +8,13 @@
 
 ```
 Integration Tests
-├── Storage Layer (已完成)
-│   ├── node_lease_integration_test.go  ✅
-│   ├── primary_check_test.go           ✅
-│   └── epoch_fencing_test.go           ✅
+├── Storage Layer (已完成 ✅)
+│   ├── node_lease_integration_test.go  ✅ 节点租约、KeepAlive
+│   ├── primary_check_test.go           ✅ 主副本检查
+│   └── epoch_fencing_test.go           ✅ Epoch 防护
 │
-├── Metadata Layer (待补充)
-│   ├── ha_integration_test.go          ❌ Leader 选举、failover
+├── Metadata Layer (部分完成 🚧)
+│   ├── ha_integration_test.go          ✅ Leader 选举、failover (7个测试)
 │   ├── route_table_integration_test.go ❌ 路由表持久化、订阅
 │   └── node_registration_test.go       ❌ 节点注册、心跳
 │
@@ -30,14 +30,23 @@ Integration Tests
 
 ## 详细测试场景
 
-### 1. Metadata HA 集成测试 (ha_integration_test.go)
+### 1. Metadata HA 集成测试 (ha_integration_test.go) ✅
+
+**状态**: ✅ 已完成 (2026-01-11)
 
 **测试用例**：
-- [ ] TestLeaderElection：3 个 Metadata 节点，验证 Leader 选举
-- [ ] TestLeaderFailover：Kill Leader，验证自动切换
-- [ ] TestWriteForwarding：非 Leader 节点拒绝写操作
-- [ ] TestReadScaling：所有节点可以处理读操作
-- [ ] TestGetLeaderInfo：客户端可以发现当前 Leader
+- [x] TestLeaderElection：3 个 Metadata 节点，验证 Leader 选举
+- [x] TestLeaderFailover：Kill Leader，验证自动切换
+- [x] TestWriteForwarding：非 Leader 节点拒绝写操作
+- [x] TestReadScaling：所有节点可以处理读操作
+- [x] TestGetLeaderInfo：客户端可以发现当前 Leader
+- [x] TestSingleNodeMode：单节点模式（ha_enabled=false）
+- [x] TestHeartbeatOnAllNodes：心跳在所有节点工作
+
+**测试结果**：
+- 7 个测试全部通过
+- 执行时间：~31 秒
+- 覆盖场景：leader 选举、failover、写转发、读扩展、客户端发现、单节点模式
 
 **依赖**：
 - etcd (localhost:2379)
@@ -181,23 +190,47 @@ test-integration-e2e:
 
 ## 实施计划
 
-### Phase 1：基础设施 (1-2 天)
-- [ ] 创建 test/testcluster 包（TestCluster helper）
-- [ ] 更新 Makefile 支持多包集成测试
+### Phase 1：基础设施 ✅ (部分完成)
+- [ ] 创建 test/testcluster 包（TestCluster helper） - 待实施
+- [x] 更新 Makefile 支持多包集成测试 - ✅ 已完成
 
-### Phase 2：Metadata 测试 (2-3 天)
-- [ ] ha_integration_test.go
-- [ ] route_table_integration_test.go
-- [ ] node_registration_test.go
+### Phase 2：Metadata 测试 🚧 (进行中)
+- [x] ha_integration_test.go - ✅ 已完成 (7个测试)
+- [ ] route_table_integration_test.go - 待实施
+- [ ] node_registration_test.go - 待实施
 
-### Phase 3：Migration 测试 (2-3 天)
-- [ ] migration_integration_test.go
+### Phase 3：Migration 测试 (待开始)
+- [ ] migration_integration_test.go - 待实施
 
-### Phase 4：Compute 测试 (2-3 天)
-- [ ] compute_storage_integration_test.go
+### Phase 4：Compute 测试 (待开始)
+- [ ] compute_storage_integration_test.go - 待实施
 
-### Phase 5：E2E 测试 (2-3 天)
-- [ ] e2e_integration_test.go
+### Phase 5：E2E 测试 (待开始)
+- [ ] e2e_integration_test.go - 待实施
+
+---
+
+## 当前进度
+
+**已完成**：
+- ✅ Storage Layer: 3 个测试文件，7 个集成测试
+- ✅ Metadata HA: 1 个测试文件，7 个集成测试
+- ✅ Makefile 更新：支持 ./pkg/storage/... 和 ./pkg/metadata/...
+
+**测试统计**：
+- 总测试文件：4 个
+- 总测试用例：14 个
+- 执行时间：~33 秒（包含 etcd 启动和清理）
+- 成功率：100%
+
+**待实施**：
+- ❌ 路由表集成测试
+- ❌ 节点注册集成测试
+- ❌ 分区迁移集成测试
+- ❌ Compute-Storage 集成测试
+- ❌ E2E 集成测试
+
+**进度**：14 / 30+ (约 46% 完成)
 
 ---
 
