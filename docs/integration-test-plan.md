@@ -21,11 +21,11 @@ Integration Tests
 ├── Migration (部分完成 ⚠️)
 │   └── migration_integration_test.go   ⚠️ SST 导出/导入测试框架 (2个待修复, 3个待实现)
 │
-├── Compute-Storage (待补充)
-│   └── compute_storage_integration_test.go ❌ 连接池、同步写、重试
+├── Compute-Storage (框架完成 ⚠️)
+│   └── compute_storage_integration_test.go ⚠️ 测试框架 (4个待实现)
 │
-└── End-to-End (待补充)
-    └── e2e_integration_test.go         ❌ Client → Compute → Storage
+└── End-to-End (框架完成 ⚠️)
+    └── e2e_integration_test.go         ⚠️ 测试框架 (5个待实现)
 ```
 
 ## 详细测试场景
@@ -149,7 +149,78 @@ Integration Tests
 
 ---
 
-### 5. 分区迁移集成测试 (原计划)
+### 5. Compute-Storage 集成测试 (compute_storage_integration_test.go) ⚠️
+
+**状态**: ⚠️ 框架完成 (2026-01-12)
+
+**测试用例**：
+- [ ] TestStorageConnectionPool：存储节点连接池管理 (已跳过 - 待实现)
+- [ ] TestPrimaryReplicaSync：主副本同步写验证 (已跳过 - 待实现)
+- [ ] TestStorageNodeFailover：存储节点故障重试 (已跳过 - 待实现)
+- [ ] TestRouteTableUpdatePropagation：路由表更新传播 (已跳过 - 待实现)
+
+**测试结果**：
+- 4 个测试全部跳过 (Skipped)
+- 测试框架已搭建，包含详细实现计划
+
+**推迟原因**：
+1. 依赖 Migration 测试的分区分配问题先解决
+2. 需要协调 Metadata + Storage + Compute 三层，复杂度高
+3. 建议先通过单元测试验证各层交互逻辑
+
+**依赖**：
+- etcd (localhost:2379)
+- 1 个 Metadata 节点
+- 2 个 Storage 节点
+- 1 个 Compute 节点
+
+**下一步**：
+- 修复 Migration 测试的分区分配问题
+- 参考 Migration 测试的模式实现 Compute-Storage 交互
+- 或优先通过单元测试 + mock 验证交互逻辑
+
+---
+
+### 6. End-to-End 集成测试 (e2e_integration_test.go) ⚠️
+
+**状态**: ⚠️ 框架完成 (2026-01-12)
+
+**测试用例**：
+- [ ] TestFullStackPutGet：SDK → Compute → Storage → RocksDB 全栈测试 (已跳过)
+- [ ] TestCrossPartitionBatch：跨分区批量操作 (已跳过)
+- [ ] TestComputeLoadBalance：多 Compute 节点负载均衡 (已跳过)
+- [ ] TestStorageFailoverE2E：存储层故障对客户端的影响 (已跳过)
+- [ ] TestMetadataFailoverE2E：元数据层故障对服务的影响 (已跳过)
+
+**测试结果**：
+- 5 个测试全部跳过 (Skipped)
+- 测试框架已搭建，包含详细实现计划和现有 smoke test 说明
+
+**推迟原因**：
+1. 最复杂的集成场景，需要所有下层测试先稳定
+2. 需要完整多节点集群：2 Metadata + 3 Storage + 2 Compute
+3. 现有 scripts/smoke-test.sh 已提供基本 E2E 验证
+
+**当前 E2E 覆盖**：
+- ✅ Docker Compose 全栈部署测试 (docker-compose.yml)
+- ✅ Shell 脚本烟雾测试 (scripts/smoke-test.sh)
+- ✅ CLI 基本操作验证 (Put/Get/Delete)
+
+**依赖**：
+- etcd
+- 2 个 Metadata 节点 (HA 模式)
+- 3 个 Storage 节点
+- 2 个 Compute 节点
+- Go SDK Client
+
+**下一步**：
+- 优先修复 Migration、Compute-Storage 测试
+- 考虑将 smoke-test.sh 转换为 Go 测试
+- 实施 Docker-based 集成测试环境
+
+---
+
+### 7. 原计划：分区迁移集成测试 (已在上文实现为 Section 4)
 
 **测试用例**：
 - [ ] TestSSTExport：从源节点导出 SST 文件
@@ -166,7 +237,7 @@ Integration Tests
 
 ---
 
-### 5. Compute-Storage 集成测试 (compute_storage_integration_test.go)
+### 8. 原计划：Compute-Storage 集成测试 (已在上文实现为 Section 5)
 
 **测试用例**：
 - [ ] TestStorageConnectionPool：连接池创建和复用
@@ -267,11 +338,11 @@ test-integration-e2e:
 ### Phase 3：Migration 测试 ⚠️ (部分完成)
 - [x] migration_integration_test.go - ⚠️ 框架已搭建，5个测试跳过（分区分配问题待解决）
 
-### Phase 4：Compute 测试 (待开始)
-- [ ] compute_storage_integration_test.go - 待实施
+### Phase 4：Compute-Storage 测试 ⚠️ (框架完成)
+- [x] compute_storage_integration_test.go - ⚠️ 框架已搭建，4个测试跳过（待实现）
 
-### Phase 5：E2E 测试 (待开始)
-- [ ] e2e_integration_test.go - 待实施
+### Phase 5：E2E 测试 ⚠️ (框架完成)
+- [x] test/integration/e2e_integration_test.go - ⚠️ 框架已搭建，5个测试跳过（待实现）
 
 ---
 
@@ -283,21 +354,30 @@ test-integration-e2e:
 - ✅ Metadata Route Table: 1 个测试文件，5 个集成测试（4个通过，1个跳过）
 - ✅ Metadata Node Registration: 1 个测试文件，5 个集成测试
 - ⚠️ Migration: 1 个测试文件，5 个测试（全部跳过 - 分区分配时序问题）
-- ✅ Makefile 更新：支持 ./pkg/storage/... 和 ./pkg/metadata/...
+- ⚠️ Compute-Storage: 1 个测试文件，4 个测试（全部跳过 - 待实现）
+- ⚠️ E2E: 1 个测试文件，5 个测试（全部跳过 - 待实现）
+- ✅ Makefile 更新：支持 ./pkg/storage/... 和 ./pkg/metadata/... 和 ./test/integration/...
 - ✅ etcd 启动脚本优化：统一 PID 管理，fail-fast 连接验证
 
 **测试统计**：
-- 总测试文件：7 个
-- 总测试用例：29 个（23个通过，6个跳过）
-- 执行时间：~45 秒（包含 etcd 启动和清理）
-- 成功率：100%（跳过的测试标注了TODO和原因）
+- 总测试文件：9 个
+- 总测试用例：38 个（23个通过，15个跳过）
+- 执行时间：~45 秒（通过的测试，包含 etcd 启动和清理）
+- 框架完成度：100%（所有 5 个阶段的测试框架已搭建）
+- 实现完成度：60%（23/38 测试实现并通过）
 
-**待实施**：
-- ⚠️ 分区迁移集成测试 - 需解决分区分配时序问题
-- ❌ Compute-Storage 集成测试
-- ❌ E2E 集成测试
+**测试框架已搭建但待实现**：
+- ⚠️ 分区迁移集成测试 - 5个测试跳过（需解决分区分配时序问题）
+- ⚠️ Compute-Storage 集成测试 - 4个测试跳过（依赖迁移测试修复）
+- ⚠️ E2E 集成测试 - 5个测试跳过（最复杂场景，现有 smoke-test.sh 提供基本覆盖）
 
-**进度**：29 / 35+ (约 83% 完成，其中 6 个测试跳过)
+**关键里程碑**：
+- ✅ 所有 5 个测试阶段的框架已完成
+- ✅ Storage 和 Metadata 层测试全部通过
+- ⚠️ Migration/Compute/E2E 层遇到技术挑战，已文档化解决路径
+- ✅ 每个跳过的测试都包含详细的TODO和实现计划
+
+**进度**：38 个测试框架完成 / 23 个测试实现通过 (框架 100% 完成，实现 60% 完成)
 
 ---
 
