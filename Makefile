@@ -115,7 +115,7 @@ test-integration:
 	fi
 	@echo "✅ etcd started (PID: $$(cat /tmp/etcd-test.pid))"
 	@echo "Running integration tests..."
-	@CGO_ENABLED=1 $(GOTEST) -v -tags integration ./pkg/storage/... || (make test-integration-cleanup && exit 1)
+	@CGO_ENABLED=1 $(GOTEST) -v -tags integration ./pkg/storage/... ./pkg/metadata/... || (make test-integration-cleanup && exit 1)
 	@make test-integration-cleanup
 
 # 清理集成测试环境
