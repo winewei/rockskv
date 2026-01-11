@@ -64,8 +64,8 @@ type Server struct {
 	leaseCtx        context.Context
 	leaseCancel     context.CancelFunc
 
-	// Replication: maps partition ID to replicator
-	replicators   map[uint32]*PartitionReplicator
+	// Replication: maps partition ID to WAL replicator
+	replicators   map[uint32]*WALReplicator
 	replicatorsMu sync.RWMutex
 }
 
@@ -102,7 +102,7 @@ func NewServer(config *ServerConfig) (*Server, error) {
 		partitionLeases:  make(map[uint32]int64),
 		leaseCtx:         leaseCtx,
 		leaseCancel:      leaseCancel,
-		replicators:      make(map[uint32]*PartitionReplicator),
+		replicators:      make(map[uint32]*WALReplicator),
 	}
 
 	return server, nil
@@ -964,12 +964,8 @@ func (s *Server) enqueueReplication(partitionID uint32, key, value []byte, isDel
 		return
 	}
 
-	entry := &ReplicationEntry{
-		Key:      key,
-		Value:    value,
-		IsDelete: isDelete,
-	}
-	replicator.Enqueue(entry)
+	// Use WAL-based async replication
+	replicator.Append(key, value, isDelete)
 }
 
 // Replicate implements StorageService.Replicate (called on Replica by Primary)
@@ -1005,14 +1001,8 @@ func (s *Server) Replicate(ctx context.Context, req *pb.ReplicateRequest) (*pb.R
 		lastApplied = entry.Offset
 	}
 
-	// Update replicator offset if exists
-	s.replicatorsMu.RLock()
-	replicator, exists := s.replicators[req.PartitionId]
-	s.replicatorsMu.RUnlock()
-
-	if exists && replicator != nil {
-		replicator.CommitOffset(req.CommitOffset)
-	}
+	// Note: WALReplicator on Replica side doesn't need offset tracking
+	// The Primary tracks replication progress via response
 
 	return &pb.ReplicateResponse{
 		Success:           true,
@@ -1036,14 +1026,14 @@ func (s *Server) GetReplicationStatus(ctx context.Context, req *pb.GetReplicatio
 	return &pb.GetReplicationStatusResponse{
 		PartitionId:     req.PartitionId,
 		IsPrimary:       replicator.isPrimary,
-		CurrentOffset:   replicator.GetCurrentOffset(),
-		CommittedOffset: replicator.GetCommittedOffset(),
-		ReplicationLag:  replicator.GetReplicationLag(),
+		CurrentOffset:   int64(replicator.GetCurrentSequence()),
+		CommittedOffset: int64(replicator.GetReplicatedSequence()),
+		ReplicationLag:  int64(replicator.GetReplicationLag()),
 		ReplicaAddr:     replicator.replicaAddr,
 	}, nil
 }
 
-// initializeReplicator creates a replicator for a partition
+// initializeReplicator creates a WAL replicator for a partition
 func (s *Server) initializeReplicator(partitionID uint32, isPrimary bool, replicaAddr string) {
 	s.replicatorsMu.Lock()
 	defer s.replicatorsMu.Unlock()
@@ -1053,9 +1043,9 @@ func (s *Server) initializeReplicator(partitionID uint32, isPrimary bool, replic
 		existing.Stop()
 	}
 
-	replicator := NewPartitionReplicator(partitionID, isPrimary, replicaAddr)
+	replicator := NewWALReplicator(partitionID, isPrimary, replicaAddr)
 	if err := replicator.Start(); err != nil {
-		s.logger.Warn("Failed to start replicator",
+		s.logger.Warn("Failed to start WAL replicator",
 			zap.Uint32("partition_id", partitionID),
 			zap.Error(err),
 		)

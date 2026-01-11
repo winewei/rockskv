@@ -207,7 +207,7 @@ func (s *Server) doGet(ctx context.Context, nodeID string, key []byte, partition
 	}, nil
 }
 
-// Put implements KVService.Put with dual-replica sync write
+// Put implements KVService.Put - writes only to Primary, Replica syncs via WAL
 func (s *Server) Put(ctx context.Context, req *pb.PutRequest) (*pb.PutResponse, error) {
 	start := time.Now()
 	defer func() {
@@ -215,38 +215,13 @@ func (s *Server) Put(ctx context.Context, req *pb.PutRequest) (*pb.PutResponse, 
 	}()
 
 	// Get partition nodes
-	primary, replica, partitionID, err := s.router.GetPartitionNodes(req.Key)
+	primary, _, partitionID, err := s.router.GetPartitionNodes(req.Key)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
 	}
 
-	// Parallel write to both primary and replica
-	var wg sync.WaitGroup
-	errCh := make(chan error, 2)
-
-	wg.Add(2)
-
-	// Write to primary
-	go func() {
-		defer wg.Done()
-		if err := s.doPut(ctx, primary, req.Key, req.Value, partitionID); err != nil {
-			errCh <- fmt.Errorf("primary write failed: %w", err)
-		}
-	}()
-
-	// Write to replica
-	go func() {
-		defer wg.Done()
-		if err := s.doPut(ctx, replica, req.Key, req.Value, partitionID); err != nil {
-			errCh <- fmt.Errorf("replica write failed: %w", err)
-		}
-	}()
-
-	wg.Wait()
-	close(errCh)
-
-	// Check for errors - both must succeed
-	for err := range errCh {
+	// Write only to Primary - Replica will sync via WAL replication
+	if err := s.doPut(ctx, primary, req.Key, req.Value, partitionID); err != nil {
 		s.logger.Error("Put failed",
 			zap.Uint32("partition_id", partitionID),
 			zap.Error(err),
@@ -288,7 +263,7 @@ func (s *Server) doPut(ctx context.Context, nodeID string, key, value []byte, pa
 	return nil
 }
 
-// Delete implements KVService.Delete with dual-replica sync write
+// Delete implements KVService.Delete - deletes only from Primary, Replica syncs via WAL
 func (s *Server) Delete(ctx context.Context, req *pb.DeleteRequest) (*pb.DeleteResponse, error) {
 	start := time.Now()
 	defer func() {
@@ -296,38 +271,13 @@ func (s *Server) Delete(ctx context.Context, req *pb.DeleteRequest) (*pb.DeleteR
 	}()
 
 	// Get partition nodes
-	primary, replica, partitionID, err := s.router.GetPartitionNodes(req.Key)
+	primary, _, partitionID, err := s.router.GetPartitionNodes(req.Key)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
 	}
 
-	// Parallel delete from both primary and replica
-	var wg sync.WaitGroup
-	errCh := make(chan error, 2)
-
-	wg.Add(2)
-
-	// Delete from primary
-	go func() {
-		defer wg.Done()
-		if err := s.doDelete(ctx, primary, req.Key, partitionID); err != nil {
-			errCh <- fmt.Errorf("primary delete failed: %w", err)
-		}
-	}()
-
-	// Delete from replica
-	go func() {
-		defer wg.Done()
-		if err := s.doDelete(ctx, replica, req.Key, partitionID); err != nil {
-			errCh <- fmt.Errorf("replica delete failed: %w", err)
-		}
-	}()
-
-	wg.Wait()
-	close(errCh)
-
-	// Check for errors - both must succeed
-	for err := range errCh {
+	// Delete only from Primary - Replica will sync via WAL replication
+	if err := s.doDelete(ctx, primary, req.Key, partitionID); err != nil {
 		s.logger.Error("Delete failed",
 			zap.Uint32("partition_id", partitionID),
 			zap.Error(err),
