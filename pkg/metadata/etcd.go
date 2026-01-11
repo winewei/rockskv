@@ -77,6 +77,18 @@ func NewEtcdStore(config *EtcdConfig) (*EtcdStore, error) {
 		return nil, fmt.Errorf("failed to connect to etcd: %w", err)
 	}
 
+	// Fail-fast: Immediately verify the connection is working
+	// This catches etcd unavailability early instead of waiting for timeouts later
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// Try to get status from any endpoint to verify connectivity
+	_, err = client.Status(ctx, config.Endpoints[0])
+	if err != nil {
+		client.Close()
+		return nil, fmt.Errorf("failed to verify etcd connection (is etcd running?): %w", err)
+	}
+
 	logger := common.NewLogger("etcd-store")
 	logger.Info("Connected to etcd", zap.Strings("endpoints", config.Endpoints))
 

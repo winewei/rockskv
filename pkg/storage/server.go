@@ -118,6 +118,19 @@ func NewServer(config *ServerConfig) (*Server, error) {
 			leaseCancel() // Clean up context
 			return nil, fmt.Errorf("failed to connect to etcd: %w", err)
 		}
+
+		// Fail-fast: Immediately verify the connection is working
+		// This catches etcd unavailability early instead of waiting for timeouts later
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_, err = client.Status(ctx, config.EtcdEndpoints[0])
+		if err != nil {
+			client.Close()
+			db.Close()
+			leaseCancel()
+			return nil, fmt.Errorf("failed to verify etcd connection (is etcd running?): %w", err)
+		}
+
 		etcdClient = client
 		logger.Info("Connected to etcd for node-level lease management",
 			zap.Strings("endpoints", config.EtcdEndpoints),
