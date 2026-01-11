@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -376,7 +377,7 @@ func (cl *CommandLog) Truncate(beforeSeq uint64) error {
 	return nil
 }
 
-// recover loads existing log state
+// recover loads existing log state and rebuilds the index
 func (cl *CommandLog) recover() error {
 	files, err := filepath.Glob(filepath.Join(cl.logDir, "*"+LogFileSuffix))
 	if err != nil {
@@ -387,14 +388,24 @@ func (cl *CommandLog) recover() error {
 		return nil
 	}
 
-	// Find the last entry to get current sequence
+	// Sort files to process in order
+	sort.Strings(files)
+
+	// Find the last entry to get current sequence and rebuild index
 	var maxSeq uint64
 	for _, file := range files {
+		fileInfo, err := os.Stat(file)
+		if err != nil {
+			continue
+		}
+		fileNum := fileInfo.ModTime().UnixNano()
+
 		f, err := os.Open(file)
 		if err != nil {
 			continue
 		}
 
+		offset := int64(0)
 		for {
 			entry, err := DecodeCommandEntry(f)
 			if err == io.EOF {
@@ -404,6 +415,16 @@ func (cl *CommandLog) recover() error {
 				cl.logger.Warn("Recovery: corrupted entry", zap.String("file", file), zap.Error(err))
 				break
 			}
+
+			// Rebuild index
+			cl.index[entry.Sequence] = logPosition{
+				fileNum: fileNum,
+				offset:  offset,
+			}
+
+			// Calculate entry size: seq(8) + ts(8) + type(1) + keyLen(4) + valueLen(4) + key + value + crc(4)
+			entrySize := int64(8 + 8 + 1 + 4 + 4 + len(entry.Key) + len(entry.Value) + 4)
+			offset += entrySize
 
 			if entry.Sequence > maxSeq {
 				maxSeq = entry.Sequence
@@ -420,6 +441,7 @@ func (cl *CommandLog) recover() error {
 		zap.Uint32("partition_id", cl.partitionID),
 		zap.Int("file_count", len(files)),
 		zap.Uint64("max_seq", maxSeq),
+		zap.Int("index_entries", len(cl.index)),
 	)
 
 	return nil
@@ -540,7 +562,12 @@ func (cl *CommandLog) ReplayTo(db *RocksDB, fromSeq uint64) (uint64, error) {
 					f.Close()
 					return lastSeq, fmt.Errorf("replay field batch decode failed at seq %d: %w", entry.Sequence, err)
 				}
-				fs := NewFieldStorage(db)
+				// Use partition ID from FieldBatch or fallback to command log's partition
+				partitionID := fb.PartitionID
+				if partitionID == 0 {
+					partitionID = cl.partitionID
+				}
+				fs := NewFieldStorage(db, partitionID)
 				if err := fs.ApplyFieldBatch(fb); err != nil {
 					f.Close()
 					return lastSeq, fmt.Errorf("replay field batch apply failed at seq %d: %w", entry.Sequence, err)

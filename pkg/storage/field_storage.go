@@ -14,14 +14,13 @@ import (
 )
 
 // Field storage key format:
-// Format: pk_len(4) + pk + separator(1) + field_name
-// Example: user:123#name -> "Alice"
-//          user:123#age -> 30
-//          user:123#_meta -> {"created_at": ...}  // special group for metadata
+// Format: "p:" + partition_id(4 bytes) + ":" + pk_len(4 bytes) + pk + field_name
+// The partition prefix ensures field data is co-located with regular KV data
+// and migrated together during partition migration.
 
 const (
-	// FieldSeparator separates primary key from field name
-	FieldSeparator byte = '#'
+	// FieldKeyMarker marks a field key (distinguishes from regular KV keys)
+	FieldKeyMarker byte = 'f'
 
 	// MetaFieldName stores document metadata (schema version, created_at, etc.)
 	MetaFieldName = "_meta"
@@ -32,44 +31,86 @@ const (
 
 // FieldKey represents a key with field-level storage
 type FieldKey struct {
-	PrimaryKey []byte
-	FieldName  string
+	PartitionID uint32
+	PrimaryKey  []byte
+	FieldName   string
 }
 
 // Encode creates the storage key for a field
-// Format: pk + separator + field_name
+// Format: "p:" + partition_id(4) + ":f" + pk_len(4) + pk + field_name
+// This format:
+// - Starts with partition prefix for data isolation
+// - Uses 'f' marker to distinguish from regular keys
+// - Uses length-prefix for pk to handle any byte sequence safely
 func (fk *FieldKey) Encode() []byte {
-	// pk#field_name
-	buf := make([]byte, len(fk.PrimaryKey)+1+len(fk.FieldName))
-	copy(buf, fk.PrimaryKey)
-	buf[len(fk.PrimaryKey)] = FieldSeparator
-	copy(buf[len(fk.PrimaryKey)+1:], fk.FieldName)
+	// p:<partition_id>:f<pk_len><pk><field_name>
+	// Total: 2 + 4 + 1 + 1 + 4 + len(pk) + len(field_name)
+	buf := make([]byte, 2+4+1+1+4+len(fk.PrimaryKey)+len(fk.FieldName))
+	buf[0] = 'p'
+	buf[1] = ':'
+	binary.BigEndian.PutUint32(buf[2:6], fk.PartitionID)
+	buf[6] = ':'
+	buf[7] = FieldKeyMarker
+	binary.BigEndian.PutUint32(buf[8:12], uint32(len(fk.PrimaryKey)))
+	copy(buf[12:], fk.PrimaryKey)
+	copy(buf[12+len(fk.PrimaryKey):], fk.FieldName)
 	return buf
 }
 
 // DecodeFieldKey parses a storage key into FieldKey
 func DecodeFieldKey(key []byte) (*FieldKey, error) {
-	idx := bytes.IndexByte(key, FieldSeparator)
-	if idx < 0 {
-		return nil, fmt.Errorf("invalid field key: no separator")
+	// Minimum length: p: + partition(4) + :f + pk_len(4) + at least 0 bytes pk
+	if len(key) < 12 {
+		return nil, fmt.Errorf("invalid field key: too short")
 	}
+	if key[0] != 'p' || key[1] != ':' || key[6] != ':' || key[7] != FieldKeyMarker {
+		return nil, fmt.Errorf("invalid field key: wrong format")
+	}
+
+	partitionID := binary.BigEndian.Uint32(key[2:6])
+	pkLen := binary.BigEndian.Uint32(key[8:12])
+
+	if len(key) < int(12+pkLen) {
+		return nil, fmt.Errorf("invalid field key: pk length mismatch")
+	}
+
 	return &FieldKey{
-		PrimaryKey: key[:idx],
-		FieldName:  string(key[idx+1:]),
+		PartitionID: partitionID,
+		PrimaryKey:  key[12 : 12+pkLen],
+		FieldName:   string(key[12+pkLen:]),
 	}, nil
 }
 
-// MakeFieldKey creates a storage key for a specific field
-func MakeFieldKey(pk []byte, fieldName string) []byte {
-	fk := &FieldKey{PrimaryKey: pk, FieldName: fieldName}
+// MakeFieldKey creates a storage key for a specific field with partition
+func MakeFieldKey(partitionID uint32, pk []byte, fieldName string) []byte {
+	fk := &FieldKey{PartitionID: partitionID, PrimaryKey: pk, FieldName: fieldName}
 	return fk.Encode()
 }
 
-// GetFieldPrefix returns the prefix for all fields of a primary key
-func GetFieldPrefix(pk []byte) []byte {
-	buf := make([]byte, len(pk)+1)
-	copy(buf, pk)
-	buf[len(pk)] = FieldSeparator
+// GetFieldPrefix returns the prefix for all fields of a primary key within a partition
+func GetFieldPrefix(partitionID uint32, pk []byte) []byte {
+	// p:<partition_id>:f<pk_len><pk>
+	buf := make([]byte, 2+4+1+1+4+len(pk))
+	buf[0] = 'p'
+	buf[1] = ':'
+	binary.BigEndian.PutUint32(buf[2:6], partitionID)
+	buf[6] = ':'
+	buf[7] = FieldKeyMarker
+	binary.BigEndian.PutUint32(buf[8:12], uint32(len(pk)))
+	copy(buf[12:], pk)
+	return buf
+}
+
+// GetPartitionFieldPrefix returns the prefix for all field keys in a partition
+// Used during partition migration to export all field data
+func GetPartitionFieldPrefix(partitionID uint32) []byte {
+	// p:<partition_id>:f
+	buf := make([]byte, 8)
+	buf[0] = 'p'
+	buf[1] = ':'
+	binary.BigEndian.PutUint32(buf[2:6], partitionID)
+	buf[6] = ':'
+	buf[7] = FieldKeyMarker
 	return buf
 }
 
@@ -82,14 +123,18 @@ type FieldUpdate struct {
 
 // FieldBatch represents a batch of field updates for a single document
 type FieldBatch struct {
-	PrimaryKey []byte
-	Updates    []FieldUpdate
+	PartitionID uint32 // Partition ID for replication context
+	PrimaryKey  []byte
+	Updates     []FieldUpdate
 }
 
 // Encode serializes the field batch for command log
-// Format: pk_len(4) + pk + update_count(4) + [field_len(2) + field + is_delete(1) + value_len(4) + value]...
+// Format: partition_id(4) + pk_len(4) + pk + update_count(4) + [field_len(2) + field + is_delete(1) + value_len(4) + value]...
 func (fb *FieldBatch) Encode() []byte {
 	buf := new(bytes.Buffer)
+
+	// Write partition ID
+	binary.Write(buf, binary.BigEndian, fb.PartitionID)
 
 	// Write primary key
 	binary.Write(buf, binary.BigEndian, uint32(len(fb.PrimaryKey)))
@@ -120,11 +165,17 @@ func (fb *FieldBatch) Encode() []byte {
 
 // DecodeFieldBatch deserializes a field batch from bytes
 func DecodeFieldBatch(data []byte) (*FieldBatch, error) {
-	if len(data) < 8 {
+	if len(data) < 12 { // partition_id(4) + pk_len(4) + count(4)
 		return nil, fmt.Errorf("field batch data too short")
 	}
 
 	buf := bytes.NewReader(data)
+
+	// Read partition ID
+	var partitionID uint32
+	if err := binary.Read(buf, binary.BigEndian, &partitionID); err != nil {
+		return nil, err
+	}
 
 	// Read primary key
 	var pkLen uint32
@@ -143,8 +194,9 @@ func DecodeFieldBatch(data []byte) (*FieldBatch, error) {
 	}
 
 	fb := &FieldBatch{
-		PrimaryKey: pk,
-		Updates:    make([]FieldUpdate, 0, count),
+		PartitionID: partitionID,
+		PrimaryKey:  pk,
+		Updates:     make([]FieldUpdate, 0, count),
 	}
 
 	for i := uint32(0); i < count; i++ {
@@ -188,35 +240,36 @@ func DecodeFieldBatch(data []byte) (*FieldBatch, error) {
 
 // FieldStorage provides field-level storage operations
 type FieldStorage struct {
-	db *RocksDB
+	db          *RocksDB
+	partitionID uint32
 }
 
-// NewFieldStorage creates a new field storage wrapper
-func NewFieldStorage(db *RocksDB) *FieldStorage {
-	return &FieldStorage{db: db}
+// NewFieldStorage creates a new field storage wrapper for a specific partition
+func NewFieldStorage(db *RocksDB, partitionID uint32) *FieldStorage {
+	return &FieldStorage{db: db, partitionID: partitionID}
 }
 
 // GetField retrieves a single field
 func (fs *FieldStorage) GetField(pk []byte, fieldName string) ([]byte, bool, error) {
-	key := MakeFieldKey(pk, fieldName)
+	key := MakeFieldKey(fs.partitionID, pk, fieldName)
 	return fs.db.Get(key)
 }
 
 // SetField sets a single field
 func (fs *FieldStorage) SetField(pk []byte, fieldName string, value []byte) error {
-	key := MakeFieldKey(pk, fieldName)
+	key := MakeFieldKey(fs.partitionID, pk, fieldName)
 	return fs.db.Put(key, value)
 }
 
 // DeleteField deletes a single field
 func (fs *FieldStorage) DeleteField(pk []byte, fieldName string) error {
-	key := MakeFieldKey(pk, fieldName)
+	key := MakeFieldKey(fs.partitionID, pk, fieldName)
 	return fs.db.Delete(key)
 }
 
 // GetAllFields retrieves all fields for a primary key
 func (fs *FieldStorage) GetAllFields(pk []byte) (map[string][]byte, error) {
-	prefix := GetFieldPrefix(pk)
+	prefix := GetFieldPrefix(fs.partitionID, pk)
 	fields := make(map[string][]byte)
 
 	iter := fs.db.NewIterator()
@@ -230,7 +283,7 @@ func (fs *FieldStorage) GetAllFields(pk []byte) (map[string][]byte, error) {
 			break
 		}
 
-		// Extract field name
+		// Extract field name from key (after the prefix)
 		fieldName := string(key.Data()[len(prefix):])
 		value := iter.Value()
 
@@ -257,7 +310,7 @@ func (fs *FieldStorage) SetFields(pk []byte, fields map[string][]byte) error {
 	defer batch.Destroy()
 
 	for fieldName, value := range fields {
-		key := MakeFieldKey(pk, fieldName)
+		key := MakeFieldKey(fs.partitionID, pk, fieldName)
 		batch.Put(key, value)
 	}
 
@@ -267,12 +320,14 @@ func (fs *FieldStorage) SetFields(pk []byte, fields map[string][]byte) error {
 }
 
 // ApplyFieldBatch applies a batch of field updates
+// Note: partitionID in FieldBatch is used for replication context,
+// storage uses fs.partitionID for key construction
 func (fs *FieldStorage) ApplyFieldBatch(fb *FieldBatch) error {
 	batch := grocksdb.NewWriteBatch()
 	defer batch.Destroy()
 
 	for _, update := range fb.Updates {
-		key := MakeFieldKey(fb.PrimaryKey, update.FieldName)
+		key := MakeFieldKey(fs.partitionID, fb.PrimaryKey, update.FieldName)
 		if update.IsDelete {
 			batch.Delete(key)
 		} else {
@@ -287,7 +342,7 @@ func (fs *FieldStorage) ApplyFieldBatch(fb *FieldBatch) error {
 
 // DeleteAllFields deletes all fields for a primary key
 func (fs *FieldStorage) DeleteAllFields(pk []byte) error {
-	prefix := GetFieldPrefix(pk)
+	prefix := GetFieldPrefix(fs.partitionID, pk)
 
 	batch := grocksdb.NewWriteBatch()
 	defer batch.Destroy()
@@ -366,33 +421,38 @@ func (fs *FieldStorage) FromJSON(pk []byte, data []byte) error {
 	return fs.SetFields(pk, fields)
 }
 
-// ListPrimaryKeys returns all unique primary keys (for debugging/admin)
-func (fs *FieldStorage) ListPrimaryKeys(prefix []byte, limit int) ([][]byte, error) {
+// ListPrimaryKeys returns all unique primary keys in this partition (for debugging/admin)
+func (fs *FieldStorage) ListPrimaryKeys(limit int) ([][]byte, error) {
 	pks := make([][]byte, 0)
 	seen := make(map[string]bool)
 
+	prefix := GetPartitionFieldPrefix(fs.partitionID)
 	iter := fs.db.NewIterator()
 	defer iter.Close()
 
 	for iter.Seek(prefix); iter.Valid() && len(pks) < limit; iter.Next() {
 		key := iter.Key()
 
-		// Find separator
-		idx := bytes.IndexByte(key.Data(), FieldSeparator)
-		if idx < 0 {
+		// Check if still within partition's field keys
+		if !bytes.HasPrefix(key.Data(), prefix) {
 			key.Free()
+			break
+		}
+
+		// Parse the field key to extract pk
+		fk, err := DecodeFieldKey(key.Data())
+		key.Free()
+		if err != nil {
 			continue
 		}
 
-		pk := string(key.Data()[:idx])
-		if !seen[pk] {
-			seen[pk] = true
-			pkCopy := make([]byte, idx)
-			copy(pkCopy, key.Data()[:idx])
+		pkStr := string(fk.PrimaryKey)
+		if !seen[pkStr] {
+			seen[pkStr] = true
+			pkCopy := make([]byte, len(fk.PrimaryKey))
+			copy(pkCopy, fk.PrimaryKey)
 			pks = append(pks, pkCopy)
 		}
-
-		key.Free()
 	}
 
 	return pks, iter.Err()
@@ -470,19 +530,20 @@ func DecodeAttributeGroup(data []byte) (*AttributeGroup, error) {
 }
 
 // GroupedFieldStorage provides attribute-group-based storage
-// Key format: pk#group_name -> encoded attribute group
+// Key format: p:<partition_id>:f<pk_len><pk><group_name> -> encoded attribute group
 type GroupedFieldStorage struct {
-	db *RocksDB
+	db          *RocksDB
+	partitionID uint32
 }
 
 // NewGroupedFieldStorage creates a new grouped field storage
-func NewGroupedFieldStorage(db *RocksDB) *GroupedFieldStorage {
-	return &GroupedFieldStorage{db: db}
+func NewGroupedFieldStorage(db *RocksDB, partitionID uint32) *GroupedFieldStorage {
+	return &GroupedFieldStorage{db: db, partitionID: partitionID}
 }
 
 // GetGroup retrieves an attribute group
 func (gfs *GroupedFieldStorage) GetGroup(pk []byte, groupName string) (*AttributeGroup, error) {
-	key := MakeFieldKey(pk, groupName)
+	key := MakeFieldKey(gfs.partitionID, pk, groupName)
 	data, found, err := gfs.db.Get(key)
 	if err != nil {
 		return nil, err
@@ -501,7 +562,7 @@ func (gfs *GroupedFieldStorage) GetGroup(pk []byte, groupName string) (*Attribut
 
 // SetGroup stores an attribute group
 func (gfs *GroupedFieldStorage) SetGroup(pk []byte, group *AttributeGroup) error {
-	key := MakeFieldKey(pk, group.Name)
+	key := MakeFieldKey(gfs.partitionID, pk, group.Name)
 	return gfs.db.Put(key, group.Encode())
 }
 
@@ -535,6 +596,6 @@ func (gfs *GroupedFieldStorage) UpdateGroupFields(pk []byte, groupName string, u
 
 // DeleteGroup deletes an entire attribute group
 func (gfs *GroupedFieldStorage) DeleteGroup(pk []byte, groupName string) error {
-	key := MakeFieldKey(pk, groupName)
+	key := MakeFieldKey(gfs.partitionID, pk, groupName)
 	return gfs.db.Delete(key)
 }

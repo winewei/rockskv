@@ -389,7 +389,7 @@ func (s *Server) GetField(ctx context.Context, req *pb.StorageGetFieldRequest) (
 		}, nil
 	}
 
-	fs := NewFieldStorage(s.db)
+	fs := NewFieldStorage(s.db, req.PartitionId)
 	value, found, err := fs.GetField(req.PrimaryKey, req.FieldName)
 	if err != nil {
 		s.logger.Error("GetField failed",
@@ -437,8 +437,9 @@ func (s *Server) SetFields(ctx context.Context, req *pb.StorageSetFieldsRequest)
 
 	// Build field batch
 	fb := &FieldBatch{
-		PrimaryKey: req.PrimaryKey,
-		Updates:    make([]FieldUpdate, 0, len(req.Fields)),
+		PartitionID: req.PartitionId,
+		PrimaryKey:  req.PrimaryKey,
+		Updates:     make([]FieldUpdate, 0, len(req.Fields)),
 	}
 	for _, field := range req.Fields {
 		fb.Updates = append(fb.Updates, FieldUpdate{
@@ -449,7 +450,7 @@ func (s *Server) SetFields(ctx context.Context, req *pb.StorageSetFieldsRequest)
 	}
 
 	// Apply field batch
-	fs := NewFieldStorage(s.db)
+	fs := NewFieldStorage(s.db, req.PartitionId)
 	if err := fs.ApplyFieldBatch(fb); err != nil {
 		s.logger.Error("SetFields failed",
 			zap.Error(err),
@@ -488,7 +489,7 @@ func (s *Server) DeleteField(ctx context.Context, req *pb.StorageDeleteFieldRequ
 		}, nil
 	}
 
-	fs := NewFieldStorage(s.db)
+	fs := NewFieldStorage(s.db, req.PartitionId)
 	if err := fs.DeleteField(req.PrimaryKey, req.FieldName); err != nil {
 		s.logger.Error("DeleteField failed",
 			zap.Error(err),
@@ -503,7 +504,8 @@ func (s *Server) DeleteField(ctx context.Context, req *pb.StorageDeleteFieldRequ
 
 	// Enqueue for async replication
 	fb := &FieldBatch{
-		PrimaryKey: req.PrimaryKey,
+		PartitionID: req.PartitionId,
+		PrimaryKey:  req.PrimaryKey,
 		Updates: []FieldUpdate{
 			{FieldName: req.FieldName, IsDelete: true},
 		},
@@ -533,7 +535,7 @@ func (s *Server) GetAllFields(ctx context.Context, req *pb.StorageGetAllFieldsRe
 		}, nil
 	}
 
-	fs := NewFieldStorage(s.db)
+	fs := NewFieldStorage(s.db, req.PartitionId)
 	fields, err := fs.GetAllFields(req.PrimaryKey)
 	if err != nil {
 		s.logger.Error("GetAllFields failed",
@@ -1223,7 +1225,12 @@ func (s *Server) Replicate(ctx context.Context, req *pb.ReplicateRequest) (*pb.R
 				err = decodeErr
 				break
 			}
-			fs := NewFieldStorage(s.db)
+			// Use partition ID from FieldBatch (set during encoding) or fallback to request
+			partitionID := fb.PartitionID
+			if partitionID == 0 {
+				partitionID = req.PartitionId
+			}
+			fs := NewFieldStorage(s.db, partitionID)
 			err = fs.ApplyFieldBatch(fb)
 
 		case pb.ReplicationOpType_REP_OP_PUT:

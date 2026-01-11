@@ -620,6 +620,7 @@ func (s *Server) BatchGet(ctx context.Context, req *pb.BatchGetRequest) (*pb.Bat
 }
 
 // BatchPut implements KVService.BatchPut
+// Writes only to Primary - Replica syncs via Command Log replication
 func (s *Server) BatchPut(ctx context.Context, req *pb.BatchPutRequest) (*pb.BatchPutResponse, error) {
 	start := time.Now()
 	defer func() {
@@ -634,19 +635,19 @@ func (s *Server) BatchPut(ctx context.Context, req *pb.BatchPutRequest) (*pb.Bat
 	}
 
 	var wg sync.WaitGroup
-	errCh := make(chan error, len(partitionItems)*2)
+	errCh := make(chan error, len(partitionItems))
 	count := int32(0)
 	var mu sync.Mutex
 
 	for partitionID, items := range partitionItems {
-		primary, replica, _, err := s.router.GetPartitionNodesByID(partitionID)
+		primary, _, _, err := s.router.GetPartitionNodesByID(partitionID)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
 		}
 
-		wg.Add(2)
+		wg.Add(1)
 
-		// Write to primary
+		// Write only to Primary - Replica will sync via Command Log replication
 		go func(nodeID string, pid uint32, items []*pb.KeyValue) {
 			defer wg.Done()
 			if err := s.doBatchPut(ctx, nodeID, items, pid); err != nil {
@@ -657,14 +658,6 @@ func (s *Server) BatchPut(ctx context.Context, req *pb.BatchPutRequest) (*pb.Bat
 				mu.Unlock()
 			}
 		}(primary, partitionID, items)
-
-		// Write to replica
-		go func(nodeID string, pid uint32, items []*pb.KeyValue) {
-			defer wg.Done()
-			if err := s.doBatchPut(ctx, nodeID, items, pid); err != nil {
-				errCh <- err
-			}
-		}(replica, partitionID, items)
 	}
 
 	wg.Wait()
@@ -678,7 +671,7 @@ func (s *Server) BatchPut(ctx context.Context, req *pb.BatchPutRequest) (*pb.Bat
 
 	return &pb.BatchPutResponse{
 		Success: true,
-		Count:   count / 2, // Divide by 2 since we counted both replicas
+		Count:   count,
 	}, nil
 }
 
