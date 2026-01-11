@@ -1,5 +1,3 @@
-//go:build cgo && !nocgo
-// +build cgo,!nocgo
 
 package storage
 
@@ -140,18 +138,18 @@ func (fb *FieldBatch) Encode() []byte {
 	buf.WriteByte(FieldBatchFormatVersion)
 
 	// Write partition ID
-	binary.Write(buf, binary.BigEndian, fb.PartitionID)
+	_ = binary.Write(buf, binary.BigEndian, fb.PartitionID) // bytes.Buffer never returns error
 
 	// Write primary key
-	binary.Write(buf, binary.BigEndian, uint32(len(fb.PrimaryKey)))
+	_ = binary.Write(buf, binary.BigEndian, uint32(len(fb.PrimaryKey))) // bytes.Buffer never returns error
 	buf.Write(fb.PrimaryKey)
 
 	// Write update count
-	binary.Write(buf, binary.BigEndian, uint32(len(fb.Updates)))
+	_ = binary.Write(buf, binary.BigEndian, uint32(len(fb.Updates))) // bytes.Buffer never returns error
 
 	for _, update := range fb.Updates {
 		// Write field name
-		binary.Write(buf, binary.BigEndian, uint16(len(update.FieldName)))
+		_ = binary.Write(buf, binary.BigEndian, uint16(len(update.FieldName))) // bytes.Buffer never returns error
 		buf.WriteString(update.FieldName)
 
 		// Write is_delete flag
@@ -162,7 +160,7 @@ func (fb *FieldBatch) Encode() []byte {
 		}
 
 		// Write value
-		binary.Write(buf, binary.BigEndian, uint32(len(update.Value)))
+		_ = binary.Write(buf, binary.BigEndian, uint32(len(update.Value))) // bytes.Buffer never returns error
 		buf.Write(update.Value)
 	}
 
@@ -526,13 +524,13 @@ func (ag *AttributeGroup) Encode() []byte {
 	sort.Strings(names)
 
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, uint32(len(ag.Fields)))
+	_ = binary.Write(buf, binary.BigEndian, uint32(len(ag.Fields))) // bytes.Buffer never returns error
 
 	for _, name := range names {
 		value := ag.Fields[name]
-		binary.Write(buf, binary.BigEndian, uint16(len(name)))
+		_ = binary.Write(buf, binary.BigEndian, uint16(len(name))) // bytes.Buffer never returns error
 		buf.WriteString(name)
-		binary.Write(buf, binary.BigEndian, uint32(len(value)))
+		_ = binary.Write(buf, binary.BigEndian, uint32(len(value))) // bytes.Buffer never returns error
 		buf.Write(value)
 	}
 

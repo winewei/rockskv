@@ -1,11 +1,10 @@
-//go:build cgo && !nocgo
-// +build cgo,!nocgo
+//go:build integration
+// +build integration
 
 package storage
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	pb "github.com/winewei/rockskv/pkg/proto"
@@ -13,9 +12,8 @@ import (
 
 // TestIsPrimary tests the IsPrimary method of PartitionManager
 func TestIsPrimary(t *testing.T) {
-	// Create a temporary database
-	dbPath := "/tmp/rockskv_test_isprimary"
-	defer os.RemoveAll(dbPath)
+	// Create a temporary database (auto-cleanup on test end)
+	dbPath := t.TempDir()
 
 	config := &RocksDBConfig{
 		DataDir:              dbPath,
@@ -78,21 +76,21 @@ func TestIsPrimary(t *testing.T) {
 
 // TestReplicaWriteRejection tests that write operations are rejected on replica partitions
 func TestReplicaWriteRejection(t *testing.T) {
+	// Create temporary directory for test (auto-cleanup on test end)
+	dataDir := t.TempDir()
+
 	// Create a test server
 	serverConfig := &ServerConfig{
 		NodeID:        "test-storage-1",
 		ListenAddr:    ":0", // Use any available port
 		MetadataAddr:  "localhost:9000",
 		RocksDB:       DefaultRocksDBConfig(),
-		SSTDir:        "/tmp/rockskv_test_replica_sst",
-		CommandLogDir: "/tmp/rockskv_test_replica_cmdlog",
+		SSTDir:        dataDir + "/sst",
+		CommandLogDir: dataDir + "/cmdlog",
+		EtcdEndpoints: []string{"localhost:2379"}, // Integration test requires etcd
 	}
-	serverConfig.RocksDB.DataDir = "/tmp/rockskv_test_replica"
-	serverConfig.RocksDB.WALDir = "/tmp/rockskv_test_replica/wal"
-
-	defer os.RemoveAll("/tmp/rockskv_test_replica")
-	defer os.RemoveAll("/tmp/rockskv_test_replica_sst")
-	defer os.RemoveAll("/tmp/rockskv_test_replica_cmdlog")
+	serverConfig.RocksDB.DataDir = dataDir
+	serverConfig.RocksDB.WALDir = dataDir + "/wal"
 
 	server, err := NewServer(serverConfig)
 	if err != nil {
@@ -200,21 +198,21 @@ func TestReplicaWriteRejection(t *testing.T) {
 
 // TestPrimaryWriteSuccess tests that write operations succeed on primary partitions
 func TestPrimaryWriteSuccess(t *testing.T) {
+	// Create temporary directory for test (auto-cleanup on test end)
+	dataDir := t.TempDir()
+
 	// Create a test server
 	serverConfig := &ServerConfig{
 		NodeID:        "test-storage-2",
 		ListenAddr:    ":0",
 		MetadataAddr:  "localhost:9000",
 		RocksDB:       DefaultRocksDBConfig(),
-		SSTDir:        "/tmp/rockskv_test_primary_sst",
-		CommandLogDir: "/tmp/rockskv_test_primary_cmdlog",
+		SSTDir:        dataDir + "/sst",
+		CommandLogDir: dataDir + "/cmdlog",
+		EtcdEndpoints: []string{"localhost:2379"}, // Integration test requires etcd
 	}
-	serverConfig.RocksDB.DataDir = "/tmp/rockskv_test_primary"
-	serverConfig.RocksDB.WALDir = "/tmp/rockskv_test_primary/wal"
-
-	defer os.RemoveAll("/tmp/rockskv_test_primary")
-	defer os.RemoveAll("/tmp/rockskv_test_primary_sst")
-	defer os.RemoveAll("/tmp/rockskv_test_primary_cmdlog")
+	serverConfig.RocksDB.DataDir = dataDir
+	serverConfig.RocksDB.WALDir = dataDir + "/wal"
 
 	server, err := NewServer(serverConfig)
 	if err != nil {

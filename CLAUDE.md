@@ -106,30 +106,36 @@ ls -la /usr/lib/x86_64-linux-gnu/librocksdb* 2>/dev/null
 sudo ldconfig
 ```
 
-### Build Modes
+### Build Requirements
 
-- **CGO mode** (default): Uses real RocksDB, full functionality
-- **nocgo mode**: Uses stub implementation, for CI/cross-compilation
+⚠️ **IMPORTANT**: RocksKV Storage service REQUIRES CGO and RocksDB.
+
+All builds (development, testing, production) use real RocksDB with `CGO_ENABLED=1`.
+
+**Prerequisites:**
+- RocksDB 10.7.5+ must be installed on your system
+- See installation instructions above for your platform
 
 ```bash
-# CGO mode (requires RocksDB installed)
-CGO_ENABLED=1 go build ./...
-
-# nocgo mode (no RocksDB required)
-CGO_ENABLED=0 go build -tags=nocgo ./...
+# All builds require RocksDB
+make build              # Uses CGO_ENABLED=1 by default
+go build ./cmd/storage  # Requires RocksDB libraries
 ```
 
 ## Build Commands
 
 ```bash
-make build              # Build all services for current platform
+make build              # Build all services for current platform (CGO_ENABLED=1)
 make build-storage      # Build only storage service
 make build-compute      # Build only compute service
 make build-metadata     # Build only metadata service
 make build-cli          # Build only CLI client
-make build-darwin-arm64 # Cross-compile for Apple Silicon
-make build-linux-amd64  # Cross-compile for Linux x86_64 (nocgo mode)
 ```
+
+**Note**: Cross-platform build targets have been removed. For distribution:
+- Use Docker images (`make docker-build`) - recommended
+- Build on target platform (Linux CI runners, macOS builders)
+- Platform packages (apt, yum, homebrew)
 
 ## Test Commands
 

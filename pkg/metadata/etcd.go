@@ -33,10 +33,6 @@ const (
 	// Session TTL for distributed lock
 	lockSessionTTL = 30 // seconds
 
-	// Partition Lease TTL for split-brain prevention
-	// 1 second TTL, renewed every 100ms
-	partitionLeaseTTL = 1 // seconds
-
 	// Default replica count
 	defaultReplicaCount = 2
 )
@@ -525,79 +521,6 @@ func (s *EtcdStore) DeleteMigrationState(ctx context.Context, partitionID uint32
 
 	s.logger.Debug("Migration state deleted", zap.Uint32("partition_id", partitionID))
 	return nil
-}
-
-// AcquirePartitionLease acquires a lease for a partition (used by Primary)
-func (s *EtcdStore) AcquirePartitionLease(ctx context.Context, partitionID uint32, nodeAddr string) (int64, error) {
-	// Create a lease with short TTL for split-brain prevention
-	lease, err := s.client.Grant(ctx, partitionLeaseTTL)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create partition lease: %w", err)
-	}
-
-	key := fmt.Sprintf("%s%d", partitionLeasePrefix, partitionID)
-
-	// Try to acquire the lease using CAS (only if key doesn't exist or is expired)
-	txn := s.client.Txn(ctx)
-	txnResp, err := txn.If(
-		clientv3.Compare(clientv3.Version(key), "=", 0),
-	).Then(
-		clientv3.OpPut(key, nodeAddr, clientv3.WithLease(lease.ID)),
-	).Commit()
-
-	if err != nil {
-		// Revoke the lease we created since we couldn't use it
-		_, _ = s.client.Revoke(ctx, lease.ID)
-		return 0, fmt.Errorf("failed to acquire partition lease: %w", err)
-	}
-
-	if !txnResp.Succeeded {
-		// Another node holds the lease
-		_, _ = s.client.Revoke(ctx, lease.ID)
-		return 0, fmt.Errorf("partition %d lease held by another node", partitionID)
-	}
-
-	s.logger.Debug("Partition lease acquired",
-		zap.Uint32("partition_id", partitionID),
-		zap.String("node_addr", nodeAddr),
-		zap.Int64("lease_id", int64(lease.ID)),
-	)
-
-	return int64(lease.ID), nil
-}
-
-// RenewPartitionLease renews a partition lease (keepalive)
-func (s *EtcdStore) RenewPartitionLease(ctx context.Context, leaseID int64) error {
-	_, err := s.client.KeepAliveOnce(ctx, clientv3.LeaseID(leaseID))
-	if err != nil {
-		return fmt.Errorf("failed to renew partition lease: %w", err)
-	}
-	return nil
-}
-
-// RevokePartitionLease revokes a partition lease (on graceful shutdown)
-func (s *EtcdStore) RevokePartitionLease(ctx context.Context, leaseID int64) error {
-	_, err := s.client.Revoke(ctx, clientv3.LeaseID(leaseID))
-	if err != nil {
-		return fmt.Errorf("failed to revoke partition lease: %w", err)
-	}
-	s.logger.Debug("Partition lease revoked", zap.Int64("lease_id", leaseID))
-	return nil
-}
-
-// GetPartitionLeaseHolder returns the current holder of a partition lease
-func (s *EtcdStore) GetPartitionLeaseHolder(ctx context.Context, partitionID uint32) (string, error) {
-	key := fmt.Sprintf("%s%d", partitionLeasePrefix, partitionID)
-	resp, err := s.client.Get(ctx, key)
-	if err != nil {
-		return "", fmt.Errorf("failed to get partition lease: %w", err)
-	}
-
-	if len(resp.Kvs) == 0 {
-		return "", nil // No holder (lease expired or not acquired)
-	}
-
-	return string(resp.Kvs[0].Value), nil
 }
 
 // Close closes the etcd client and session

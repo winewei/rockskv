@@ -36,12 +36,6 @@ type Store interface {
 	GetMigrationState(ctx context.Context, partitionID uint32) (*MigrationInfo, error)
 	DeleteMigrationState(ctx context.Context, partitionID uint32) error
 
-	// Partition Lease operations (for split-brain prevention)
-	AcquirePartitionLease(ctx context.Context, partitionID uint32, nodeAddr string) (leaseID int64, err error)
-	RenewPartitionLease(ctx context.Context, leaseID int64) error
-	RevokePartitionLease(ctx context.Context, leaseID int64) error
-	GetPartitionLeaseHolder(ctx context.Context, partitionID uint32) (nodeAddr string, err error)
-
 	// Close closes the store
 	Close() error
 }

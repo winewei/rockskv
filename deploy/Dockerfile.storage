@@ -1,10 +1,29 @@
 # Dockerfile for RocksKV Storage Service
-FROM golang:1.21-alpine AS builder
+# IMPORTANT: This builds with REAL RocksDB for production use
+FROM golang:1.21-bullseye AS builder
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apk add --no-cache git
+# Install RocksDB build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libgflags-dev \
+    libsnappy-dev \
+    zlib1g-dev \
+    libbz2-dev \
+    liblz4-dev \
+    libzstd-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build RocksDB 10.7.5 from source
+RUN cd /tmp && \
+    git clone --depth 1 --branch v10.7.5 https://github.com/facebook/rocksdb.git && \
+    cd rocksdb && \
+    make shared_lib -j$(nproc) && \
+    make install-shared INSTALL_PATH=/usr/local && \
+    ldconfig && \
+    cd / && rm -rf /tmp/rocksdb
 
 # Copy go mod files
 COPY go.mod go.sum ./
@@ -13,18 +32,31 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the binary (using stub implementation without CGO)
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /rockskv-storage ./cmd/storage
+# Build with CGO enabled to use real RocksDB
+RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-w -s" -o /rockskv-storage ./cmd/storage
 
-# Final stage
-FROM alpine:3.19
+# Final stage - use Debian base for glibc compatibility
+FROM debian:bullseye-slim
 
-RUN apk add --no-cache ca-certificates tzdata
+# Install runtime dependencies for RocksDB
+RUN apt-get update && apt-get install -y \
+    libsnappy1v5 \
+    liblz4-1 \
+    libzstd1 \
+    libbz2-1.0 \
+    zlib1g \
+    ca-certificates \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy RocksDB shared libraries from builder
+COPY --from=builder /usr/local/lib/librocksdb.so* /usr/local/lib/
+RUN ldconfig
 
 COPY --from=builder /rockskv-storage /usr/local/bin/rockskv-storage
 
 # Create non-root user and data directory
-RUN adduser -D -g '' rockskv && \
+RUN useradd -r -s /bin/false rockskv && \
     mkdir -p /data/wal /data/sst && \
     chown -R rockskv:rockskv /data
 

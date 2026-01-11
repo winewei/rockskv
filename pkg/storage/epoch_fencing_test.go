@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 package storage
 
 import (
@@ -9,11 +12,19 @@ import (
 
 // TestEpochFencing verifies that stale epoch writes are rejected
 func TestEpochFencing(t *testing.T) {
+	// Create temporary directory for test (auto-cleanup on test end)
+	dataDir := t.TempDir()
+
 	// Create server
 	config := DefaultServerConfig()
 	config.NodeID = "storage-test-1"
 	config.ListenAddr = ":0" // Random port
 	config.MetadataAddr = "localhost:9000"
+	config.RocksDB.DataDir = dataDir
+	config.RocksDB.WALDir = dataDir + "/wal"
+	config.SSTDir = dataDir + "/sst"
+	config.CommandLogDir = dataDir + "/cmdlog"
+	config.EtcdEndpoints = []string{"localhost:2379"} // Integration test requires etcd
 
 	server, err := NewServer(config)
 	if err != nil {
@@ -195,10 +206,18 @@ func TestEpochFencing(t *testing.T) {
 
 // TestEpochForwardProgress verifies that epoch only moves forward
 func TestEpochForwardProgress(t *testing.T) {
+	// Create temporary directory for test (auto-cleanup on test end)
+	dataDir := t.TempDir()
+
 	config := DefaultServerConfig()
 	config.NodeID = "storage-test-2"
 	config.ListenAddr = ":0"
 	config.MetadataAddr = "localhost:9000"
+	config.RocksDB.DataDir = dataDir
+	config.RocksDB.WALDir = dataDir + "/wal"
+	config.SSTDir = dataDir + "/sst"
+	config.CommandLogDir = dataDir + "/cmdlog"
+	config.EtcdEndpoints = []string{"localhost:2379"} // Integration test requires etcd
 
 	server, err := NewServer(config)
 	if err != nil {

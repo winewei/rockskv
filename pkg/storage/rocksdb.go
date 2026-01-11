@@ -1,5 +1,3 @@
-//go:build cgo && !nocgo
-// +build cgo,!nocgo
 
 package storage
 

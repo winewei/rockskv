@@ -1,5 +1,3 @@
-//go:build cgo && !nocgo
-// +build cgo,!nocgo
 
 package storage
 
@@ -14,6 +12,7 @@ import (
 	"time"
 
 	"github.com/linxGnu/grocksdb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -27,12 +26,13 @@ import (
 
 // ServerConfig holds storage server configuration
 type ServerConfig struct {
-	NodeID       string         `mapstructure:"node_id"`
-	ListenAddr   string         `mapstructure:"listen_addr"`
-	MetadataAddr string         `mapstructure:"metadata_addr"`
-	RocksDB      *RocksDBConfig `mapstructure:"rocksdb"`
-	SSTDir       string         `mapstructure:"sst_dir"`
-	CommandLogDir string        `mapstructure:"command_log_dir"`
+	NodeID        string         `mapstructure:"node_id"`
+	ListenAddr    string         `mapstructure:"listen_addr"`
+	MetadataAddr  string         `mapstructure:"metadata_addr"`
+	EtcdEndpoints []string       `mapstructure:"etcd_endpoints"`
+	RocksDB       *RocksDBConfig `mapstructure:"rocksdb"`
+	SSTDir        string         `mapstructure:"sst_dir"`
+	CommandLogDir string         `mapstructure:"command_log_dir"`
 }
 
 // DefaultServerConfig returns a default server configuration
@@ -41,6 +41,7 @@ func DefaultServerConfig() *ServerConfig {
 		NodeID:        "storage-1",
 		ListenAddr:    ":9001",
 		MetadataAddr:  "localhost:9000",
+		EtcdEndpoints: []string{"localhost:2379"},
 		RocksDB:       DefaultRocksDBConfig(),
 		SSTDir:        "/tmp/rockskv/sst",
 		CommandLogDir: "/tmp/rockskv/cmdlog",
@@ -57,12 +58,15 @@ type Server struct {
 	grpcServer       *grpc.Server
 	metadataConn     *grpc.ClientConn
 	metadataClient   pb.MetadataServiceClient
+	etcdClient       *clientv3.Client
 	logger           *zap.Logger
 
-	// Partition leases for split-brain prevention
-	// Maps partition ID to lease ID (only for Primary partitions)
-	partitionLeases map[uint32]int64
+	// Node-level lease for split-brain prevention
+	// Single lease for the entire storage node
+	nodeLease       clientv3.LeaseID
+	nodeLeaseLost   bool
 	leaseMu         sync.RWMutex
+	leaseKeepalive  <-chan *clientv3.LeaseKeepAliveResponse
 	leaseCtx        context.Context
 	leaseCancel     context.CancelFunc
 
@@ -98,18 +102,53 @@ func NewServer(config *ServerConfig) (*Server, error) {
 
 	// Create command log directory
 	if err := os.MkdirAll(config.CommandLogDir, 0755); err != nil {
+		leaseCancel() // Clean up context
 		return nil, fmt.Errorf("failed to create command log directory: %w", err)
+	}
+
+	// Connect to etcd for node-level lease management
+	var etcdClient *clientv3.Client
+	if len(config.EtcdEndpoints) > 0 {
+		client, err := clientv3.New(clientv3.Config{
+			Endpoints:   config.EtcdEndpoints,
+			DialTimeout: 5 * time.Second,
+		})
+		if err != nil {
+			db.Close()
+			leaseCancel() // Clean up context
+			return nil, fmt.Errorf("failed to connect to etcd: %w", err)
+		}
+		etcdClient = client
+		logger.Info("Connected to etcd for node-level lease management",
+			zap.Strings("endpoints", config.EtcdEndpoints),
+		)
+	} else {
+		// No etcd configured - this is an error
+		db.Close()
+		leaseCancel()
+		return nil, fmt.Errorf("etcd endpoints required for node-level lease management")
 	}
 
 	server := &Server{
 		config:           config,
 		db:               db,
 		partitionManager: partitionManager,
+		etcdClient:       etcdClient,
 		logger:           logger,
-		partitionLeases:  make(map[uint32]int64),
+		nodeLease:        0,
+		nodeLeaseLost:    false,
 		leaseCtx:         leaseCtx,
 		leaseCancel:      leaseCancel,
 		replicators:      make(map[uint32]*CommandLogReplicator),
+	}
+
+	// Acquire node-level lease for split-brain prevention
+	if etcdClient != nil {
+		if err := server.acquireNodeLease(); err != nil {
+			db.Close()
+			leaseCancel()
+			return nil, fmt.Errorf("failed to acquire node lease: %w", err)
+		}
 	}
 
 	return server, nil
@@ -157,8 +196,13 @@ func (s *Server) Stop() {
 		s.leaseCancel()
 	}
 
-	// Release all partition leases
+	// Release node lease
 	s.releaseAllLeases()
+
+	// Close etcd connection
+	if s.etcdClient != nil {
+		s.etcdClient.Close()
+	}
 
 	// Close metadata connection
 	if s.metadataConn != nil {
@@ -174,36 +218,32 @@ func (s *Server) Stop() {
 	s.logger.Info("Storage server stopped")
 }
 
-// releaseAllLeases releases all held partition leases on shutdown
+// releaseAllLeases releases the node lease on shutdown
 func (s *Server) releaseAllLeases() {
-	if s.metadataClient == nil {
-		return
-	}
-
+	// Node lease will be automatically released when the etcd connection closes
+	// No need for explicit revocation
 	s.leaseMu.Lock()
-	defer s.leaseMu.Unlock()
+	s.nodeLease = 0
+	s.nodeLeaseLost = true
+	s.leaseMu.Unlock()
+}
 
-	for partitionID, leaseID := range s.partitionLeases {
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-		_, err := s.metadataClient.RevokePartitionLease(ctx, &pb.RevokeLeaseRequest{
-			LeaseId: leaseID,
-		})
-		cancel()
-
-		if err != nil {
-			s.logger.Warn("Failed to release partition lease on shutdown",
-				zap.Uint32("partition_id", partitionID),
-				zap.Int64("lease_id", leaseID),
-				zap.Error(err),
-			)
-		} else {
-			s.logger.Debug("Partition lease released",
-				zap.Uint32("partition_id", partitionID),
-			)
-		}
+// canWrite checks if this node can perform write operations
+// Returns false if node lease is lost (prevents split-brain writes)
+//
+// Safety model: MUST have valid node lease from etcd
+func (s *Server) canWrite() bool {
+	if s.etcdClient == nil {
+		// Should never happen (NewServer rejects this), but defensive check
+		s.logger.Error("CRITICAL: No etcd client - refusing writes")
+		return false
 	}
 
-	s.partitionLeases = make(map[uint32]int64)
+	s.leaseMu.RLock()
+	defer s.leaseMu.RUnlock()
+
+	// Allow writes only if we have a valid lease
+	return !s.nodeLeaseLost && s.nodeLease != 0
 }
 
 // unaryInterceptor logs and records metrics for unary RPCs
@@ -304,6 +344,15 @@ func (s *Server) Put(ctx context.Context, req *pb.StoragePutRequest) (*pb.Storag
 		common.StorageLatency.WithLabelValues("put").Observe(time.Since(start).Seconds())
 	}()
 
+	// Check if we can perform writes (node lease is valid)
+	if !s.canWrite() {
+		common.StorageOperations.WithLabelValues("put", "lease_lost").Inc()
+		return &pb.StoragePutResponse{
+			Success: false,
+			Error:   pb.ErrorCode_INTERNAL_ERROR,
+		}, nil
+	}
+
 	// Check if we have the partition
 	if !s.partitionManager.HasPartition(req.PartitionId) {
 		common.StorageOperations.WithLabelValues("put", "partition_not_found").Inc()
@@ -359,6 +408,15 @@ func (s *Server) Delete(ctx context.Context, req *pb.StorageDeleteRequest) (*pb.
 	defer func() {
 		common.StorageLatency.WithLabelValues("delete").Observe(time.Since(start).Seconds())
 	}()
+
+	// Check if we can perform writes (node lease is valid)
+	if !s.canWrite() {
+		common.StorageOperations.WithLabelValues("delete", "lease_lost").Inc()
+		return &pb.StorageDeleteResponse{
+			Success: false,
+			Error:   pb.ErrorCode_INTERNAL_ERROR,
+		}, nil
+	}
 
 	// Check if we have the partition
 	if !s.partitionManager.HasPartition(req.PartitionId) {
@@ -462,6 +520,15 @@ func (s *Server) SetFields(ctx context.Context, req *pb.StorageSetFieldsRequest)
 		common.StorageLatency.WithLabelValues("set_fields").Observe(time.Since(start).Seconds())
 	}()
 
+	// Check if we can perform writes (node lease is valid)
+	if !s.canWrite() {
+		common.StorageOperations.WithLabelValues("set_fields", "lease_lost").Inc()
+		return &pb.StorageSetFieldsResponse{
+			Success: false,
+			Error:   pb.ErrorCode_INTERNAL_ERROR,
+		}, nil
+	}
+
 	// Check if we have the partition
 	if !s.partitionManager.HasPartition(req.PartitionId) {
 		common.StorageOperations.WithLabelValues("set_fields", "partition_not_found").Inc()
@@ -533,6 +600,15 @@ func (s *Server) DeleteField(ctx context.Context, req *pb.StorageDeleteFieldRequ
 	defer func() {
 		common.StorageLatency.WithLabelValues("delete_field").Observe(time.Since(start).Seconds())
 	}()
+
+	// Check if we can perform writes (node lease is valid)
+	if !s.canWrite() {
+		common.StorageOperations.WithLabelValues("delete_field", "lease_lost").Inc()
+		return &pb.StorageDeleteFieldResponse{
+			Success: false,
+			Error:   pb.ErrorCode_INTERNAL_ERROR,
+		}, nil
+	}
 
 	// Check if we have the partition
 	if !s.partitionManager.HasPartition(req.PartitionId) {
@@ -643,6 +719,15 @@ func (s *Server) BatchPut(ctx context.Context, req *pb.StorageBatchPutRequest) (
 	defer func() {
 		common.StorageLatency.WithLabelValues("batch_put").Observe(time.Since(start).Seconds())
 	}()
+
+	// Check if we can perform writes (node lease is valid)
+	if !s.canWrite() {
+		common.StorageOperations.WithLabelValues("batch_put", "lease_lost").Inc()
+		return &pb.StorageBatchPutResponse{
+			Success: false,
+			Error:   pb.ErrorCode_INTERNAL_ERROR,
+		}, nil
+	}
 
 	// Check if we have the partition
 	if !s.partitionManager.HasPartition(req.PartitionId) {
@@ -973,7 +1058,9 @@ func (s *Server) registerWithMetadata() {
 	}
 
 	go s.subscribeRouteUpdates()
-	go s.leaseRenewalLoop() // Start lease renewal for split-brain prevention
+
+	// Node-level lease is already acquired in NewServer()
+	// Just start the heartbeat loop
 	s.heartbeatLoop()
 }
 
@@ -1076,8 +1163,6 @@ func (s *Server) subscribeRouteUpdates() {
 
 func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAddr string) {
 	shouldExist := make(map[uint32]bool)
-	primaryPartitions := make(map[uint32]bool)
-	partitionReplicas := make(map[uint32]string) // partition -> replica address
 	addedCount := 0
 	removedCount := 0
 
@@ -1087,10 +1172,6 @@ func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAdd
 
 		if isPrimary || isReplica {
 			shouldExist[p.PartitionId] = true
-			if isPrimary {
-				primaryPartitions[p.PartitionId] = true
-				partitionReplicas[p.PartitionId] = p.Replica
-			}
 
 			if !s.partitionManager.HasPartition(p.PartitionId) {
 				if err := s.partitionManager.AddPartitionWithEpoch(p.PartitionId, isPrimary, p.Epoch); err != nil {
@@ -1100,10 +1181,8 @@ func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAdd
 					)
 				} else {
 					addedCount++
-					// Acquire lease for new Primary partition
+					// Initialize replicator for Primary partition
 					if isPrimary {
-						s.tryAcquireLease(p.PartitionId, myAddr)
-						// Initialize replicator for Primary partition
 						s.initializeReplicator(p.PartitionId, true, p.Replica)
 					} else {
 						// Initialize replicator for Replica partition (receives data)
@@ -1112,21 +1191,15 @@ func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAdd
 				}
 			} else {
 				// Update existing partition's epoch
-				s.partitionManager.UpdatePartitionEpoch(p.PartitionId, p.Epoch)
+				if err := s.partitionManager.UpdatePartitionEpoch(p.PartitionId, p.Epoch); err != nil {
+					s.logger.Warn("Failed to update partition epoch",
+						zap.Uint32("partition_id", p.PartitionId),
+						zap.Error(err),
+					)
+				}
 			}
 		}
 	}
-
-	// Release leases for partitions we're no longer Primary for
-	s.leaseMu.Lock()
-	for partitionID, leaseID := range s.partitionLeases {
-		if !primaryPartitions[partitionID] {
-			// We're no longer Primary, release the lease
-			s.releaseLeaseAsync(leaseID)
-			delete(s.partitionLeases, partitionID)
-		}
-	}
-	s.leaseMu.Unlock()
 
 	currentPartitions := s.partitionManager.ListPartitions()
 	for _, partitionID := range currentPartitions {
@@ -1154,99 +1227,86 @@ func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAdd
 	}
 }
 
-// tryAcquireLease attempts to acquire a partition lease
-func (s *Server) tryAcquireLease(partitionID uint32, myAddr string) {
-	if s.metadataClient == nil {
-		return
+// acquireNodeLease acquires a node-level lease from etcd
+// This is used for split-brain prevention at the node level
+func (s *Server) acquireNodeLease() error {
+	if s.etcdClient == nil {
+		return fmt.Errorf("etcd client not initialized")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	// Create a lease with 3 second TTL
+	// This is longer than partition leases (1s) to reduce overhead
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	resp, err := s.metadataClient.AcquirePartitionLease(ctx, &pb.AcquireLeaseRequest{
-		PartitionId: partitionID,
-		NodeAddr:    myAddr,
-	})
+	lease, err := s.etcdClient.Grant(ctx, 3)
+	if err != nil {
+		return fmt.Errorf("failed to create node lease: %w", err)
+	}
 
-	if err != nil || !resp.Success {
-		s.logger.Warn("Failed to acquire partition lease",
-			zap.Uint32("partition_id", partitionID),
-			zap.Error(err),
-		)
-		return
+	// Start KeepAlive to maintain the lease
+	keepaliveCh, err := s.etcdClient.KeepAlive(s.leaseCtx, lease.ID)
+	if err != nil {
+		// Try to revoke the lease (best effort)
+		if _, revokeErr := s.etcdClient.Revoke(ctx, lease.ID); revokeErr != nil {
+			s.logger.Warn("Failed to revoke lease after keepalive error",
+				zap.Int64("lease_id", int64(lease.ID)),
+				zap.Error(revokeErr),
+			)
+		}
+		return fmt.Errorf("failed to start keepalive: %w", err)
 	}
 
 	s.leaseMu.Lock()
-	s.partitionLeases[partitionID] = resp.LeaseId
+	s.nodeLease = lease.ID
+	s.nodeLeaseLost = false
+	s.leaseKeepalive = keepaliveCh
 	s.leaseMu.Unlock()
 
-	s.logger.Debug("Partition lease acquired",
-		zap.Uint32("partition_id", partitionID),
-		zap.Int64("lease_id", resp.LeaseId),
+	s.logger.Info("Node lease acquired",
+		zap.Int64("lease_id", int64(lease.ID)),
 	)
+
+	// Start monitoring the keepalive channel
+	go s.monitorNodeLease()
+
+	return nil
 }
 
-// releaseLeaseAsync releases a lease asynchronously
-func (s *Server) releaseLeaseAsync(leaseID int64) {
-	if s.metadataClient == nil {
-		return
-	}
-
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-		defer cancel()
-
-		_, _ = s.metadataClient.RevokePartitionLease(ctx, &pb.RevokeLeaseRequest{
-			LeaseId: leaseID,
-		})
-	}()
-}
-
-// leaseRenewalLoop periodically renews all held partition leases
-func (s *Server) leaseRenewalLoop() {
-	// Renew leases every 100ms (TTL is 1s, so 10 chances to renew)
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
+// monitorNodeLease monitors the keepalive channel and marks lease as lost if it fails
+func (s *Server) monitorNodeLease() {
 	for {
 		select {
 		case <-s.leaseCtx.Done():
+			s.logger.Info("Node lease monitoring stopped (context cancelled)")
 			return
-		case <-ticker.C:
-			s.renewAllLeases()
-		}
-	}
-}
 
-func (s *Server) renewAllLeases() {
-	if s.metadataClient == nil {
-		return
-	}
+		case ka, ok := <-s.leaseKeepalive:
+			if !ok {
+				// KeepAlive channel closed - lease is lost
+				s.leaseMu.Lock()
+				s.nodeLeaseLost = true
+				s.leaseMu.Unlock()
 
-	s.leaseMu.RLock()
-	leases := make(map[uint32]int64, len(s.partitionLeases))
-	for k, v := range s.partitionLeases {
-		leases[k] = v
-	}
-	s.leaseMu.RUnlock()
+				s.logger.Error("Node lease lost - entering read-only mode")
+				return
+			}
 
-	for partitionID, leaseID := range leases {
-		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-		resp, err := s.metadataClient.RenewPartitionLease(ctx, &pb.RenewLeaseRequest{
-			LeaseId: leaseID,
-		})
-		cancel()
+			if ka == nil {
+				// Lease keepalive failed
+				s.leaseMu.Lock()
+				s.nodeLeaseLost = true
+				s.leaseMu.Unlock()
 
-		if err != nil || !resp.Success {
-			s.logger.Warn("Failed to renew partition lease",
-				zap.Uint32("partition_id", partitionID),
-				zap.Int64("lease_id", leaseID),
-				zap.Error(err),
+				s.logger.Error("Node lease keepalive failed - entering read-only mode")
+				return
+			}
+
+			// Lease renewed successfully - log at debug level
+			s.logger.Debug("Node lease renewed",
+				zap.Int64("lease_id", int64(ka.ID)),
+				zap.Int64("ttl", ka.TTL),
 			)
-			// Remove from map - lease may have expired
-			s.leaseMu.Lock()
-			delete(s.partitionLeases, partitionID)
-			s.leaseMu.Unlock()
 		}
 	}
 }

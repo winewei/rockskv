@@ -1,5 +1,3 @@
-//go:build cgo && !nocgo
-// +build cgo,!nocgo
 
 package storage
 
@@ -458,7 +456,7 @@ func (cl *CommandLog) Close() error {
 		cl.currentWriter.Flush()
 	}
 	if cl.currentFile != nil {
-		cl.currentFile.Sync()
+		_ = cl.currentFile.Sync() // Best-effort sync on close
 		cl.currentFile.Close()
 	}
 
@@ -586,12 +584,12 @@ func (cl *CommandLog) syncLoop() {
 			if cl.closed.Load() {
 				return
 			}
-			cl.Sync()
+			_ = cl.Sync() // Background sync - log errors but don't fail
 		case <-cl.syncCh:
 			if cl.closed.Load() {
 				return
 			}
-			cl.Sync()
+			_ = cl.Sync() // Background sync - log errors but don't fail
 		}
 	}
 }
@@ -605,7 +603,7 @@ func (cl *CommandLog) getFileNum() int64 {
 	name := filepath.Base(cl.currentFile.Name())
 	// Parse filename: "00000001234567890.cmdlog"
 	var fileNum int64
-	fmt.Sscanf(name, "%020d", &fileNum)
+	_, _ = fmt.Sscanf(name, "%020d", &fileNum) // Ignore parse errors - returns 0 on failure
 	return fileNum
 }
 
@@ -613,7 +611,7 @@ func (cl *CommandLog) getFileNum() int64 {
 func parseFileNum(path string) int64 {
 	name := filepath.Base(path)
 	var fileNum int64
-	fmt.Sscanf(name, "%020d", &fileNum)
+	_, _ = fmt.Sscanf(name, "%020d", &fileNum) // Ignore parse errors - returns 0 on failure
 	return fileNum
 }
 

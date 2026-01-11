@@ -16,6 +16,7 @@ LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 # macOS: 检测 Homebrew 前缀 (Apple Silicon: /opt/homebrew, Intel: /usr/local)
 # Linux: 使用标准系统路径
 UNAME_S := $(shell uname -s)
+export CGO_ENABLED := 1
 ifeq ($(UNAME_S),Darwin)
     HOMEBREW_PREFIX := $(shell brew --prefix 2>/dev/null || echo "/opt/homebrew")
     export CGO_CFLAGS := -I$(HOMEBREW_PREFIX)/include
@@ -71,77 +72,62 @@ build-cli:
 	@mkdir -p $(BINDIR)
 	$(GOBUILD) $(LDFLAGS) -o $(CLI_BINARY) ./cmd/cli
 
-# 构建所有平台的二进制文件
-build-all:
-	@echo "Building for all platforms..."
-	@for platform in $(PLATFORMS); do \
-		GOOS=$$(echo $$platform | cut -d'/' -f1); \
-		GOARCH=$$(echo $$platform | cut -d'/' -f2); \
-		output_dir=$(BINDIR)/$$GOOS-$$GOARCH; \
-		mkdir -p $$output_dir; \
-		echo "Building for $$GOOS/$$GOARCH..."; \
-		GOOS=$$GOOS GOARCH=$$GOARCH CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $$output_dir/rockskv-storage ./cmd/storage; \
-		GOOS=$$GOOS GOARCH=$$GOARCH CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $$output_dir/rockskv-compute ./cmd/compute; \
-		GOOS=$$GOOS GOARCH=$$GOARCH CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $$output_dir/rockskv-metadata ./cmd/metadata; \
-		GOOS=$$GOOS GOARCH=$$GOARCH CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $$output_dir/rockskv-cli ./cmd/cli; \
-	done
-	@echo "Build complete. Binaries are in $(BINDIR)/"
-
-# 构建特定平台
-build-linux-amd64:
-	@echo "Building for linux/amd64..."
-	@mkdir -p $(BINDIR)/linux-amd64
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/linux-amd64/rockskv-storage ./cmd/storage
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/linux-amd64/rockskv-compute ./cmd/compute
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/linux-amd64/rockskv-metadata ./cmd/metadata
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/linux-amd64/rockskv-cli ./cmd/cli
-
-build-linux-arm64:
-	@echo "Building for linux/arm64..."
-	@mkdir -p $(BINDIR)/linux-arm64
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/linux-arm64/rockskv-storage ./cmd/storage
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/linux-arm64/rockskv-compute ./cmd/compute
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/linux-arm64/rockskv-metadata ./cmd/metadata
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/linux-arm64/rockskv-cli ./cmd/cli
-
-build-darwin-amd64:
-	@echo "Building for darwin/amd64..."
-	@mkdir -p $(BINDIR)/darwin-amd64
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/darwin-amd64/rockskv-storage ./cmd/storage
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/darwin-amd64/rockskv-compute ./cmd/compute
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/darwin-amd64/rockskv-metadata ./cmd/metadata
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/darwin-amd64/rockskv-cli ./cmd/cli
-	@if command -v codesign >/dev/null 2>&1; then \
-		echo "Signing darwin/amd64 binaries..."; \
-		codesign -s - $(BINDIR)/darwin-amd64/rockskv-*; \
-	fi
-
-build-darwin-arm64:
-	@echo "Building for darwin/arm64 (Apple Silicon)..."
-	@mkdir -p $(BINDIR)/darwin-arm64
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/darwin-arm64/rockskv-storage ./cmd/storage
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/darwin-arm64/rockskv-compute ./cmd/compute
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/darwin-arm64/rockskv-metadata ./cmd/metadata
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(GOBUILD) $(LDFLAGS) -o $(BINDIR)/darwin-arm64/rockskv-cli ./cmd/cli
-	@if command -v codesign >/dev/null 2>&1; then \
-		echo "Signing darwin/arm64 binaries..."; \
-		codesign -s - $(BINDIR)/darwin-arm64/rockskv-*; \
-	fi
+# ========================================
+# IMPORTANT: Cross-platform binary distribution
+# ========================================
+# RocksKV Storage requires RocksDB (CGO dependency).
+# Binaries MUST be built on the target platform with CGO_ENABLED=1.
+#
+# For distribution, use ONE of the following approaches:
+#   1. Docker images (recommended) - see deploy/Dockerfile.*
+#   2. Build on target platform (Linux: use CI/CD on Linux runners)
+#   3. Platform-specific package managers (apt, yum, homebrew)
+#
+# Cross-platform build targets (build-all, build-linux-*, etc.) have been
+# removed because CGO binaries cannot be cross-compiled without the target
+# platform's RocksDB libraries.
+# ========================================
 
 # 运行测试
 test:
 	@echo "Running tests..."
-	$(GOTEST) -v -race -cover ./...
+	CGO_ENABLED=1 $(GOTEST) -v -race -cover ./...
 
 # 运行特定包的测试
 test-storage:
-	$(GOTEST) -v -race -cover ./pkg/storage/...
+	CGO_ENABLED=1 $(GOTEST) -v -race -cover ./pkg/storage/...
 
 test-compute:
-	$(GOTEST) -v -race -cover ./pkg/compute/...
+	CGO_ENABLED=1 $(GOTEST) -v -race -cover ./pkg/compute/...
 
 test-metadata:
-	$(GOTEST) -v -race -cover ./pkg/metadata/...
+	CGO_ENABLED=1 $(GOTEST) -v -race -cover ./pkg/metadata/...
+
+# 运行集成测试（自动启动和清理 etcd）
+test-integration:
+	@echo "Starting etcd for integration tests..."
+	@./scripts/start-etcd.sh > /tmp/etcd-test.log 2>&1 & echo $$! > /tmp/etcd-test.pid
+	@sleep 3
+	@if ! lsof -ti:2379 > /dev/null 2>&1; then \
+		echo "❌ etcd failed to start"; \
+		cat /tmp/etcd-test.log; \
+		exit 1; \
+	fi
+	@echo "✅ etcd started (PID: $$(cat /tmp/etcd-test.pid))"
+	@echo "Running integration tests..."
+	@CGO_ENABLED=1 $(GOTEST) -v -tags integration ./pkg/storage/... || (make test-integration-cleanup && exit 1)
+	@make test-integration-cleanup
+
+# 清理集成测试环境
+test-integration-cleanup:
+	@echo "Cleaning up integration test environment..."
+	@if [ -f /tmp/etcd-test.pid ]; then \
+		kill $$(cat /tmp/etcd-test.pid) 2>/dev/null || true; \
+		rm -f /tmp/etcd-test.pid; \
+	fi
+	@lsof -ti:2379,2380 | xargs kill -9 2>/dev/null || true
+	@rm -rf ./data/etcd /tmp/etcd-test.log
+	@echo "✅ Cleanup complete"
 
 # 清理
 clean:
@@ -181,23 +167,24 @@ docker-build:
 help:
 	@echo "RocksKV Makefile targets:"
 	@echo ""
-	@echo "Build targets:"
-	@echo "  build            - Build all services for current platform"
-	@echo "  build-all        - Build all services for all platforms (linux/darwin, amd64/arm64)"
+	@echo "Build targets (current platform only):"
+	@echo "  build            - Build all services with CGO_ENABLED=1 (requires RocksDB)"
 	@echo "  build-storage    - Build storage service"
 	@echo "  build-compute    - Build compute service"
 	@echo "  build-metadata   - Build metadata service"
 	@echo "  build-cli        - Build CLI client"
 	@echo ""
-	@echo "Cross-compile targets:"
-	@echo "  build-linux-amd64   - Build for Linux x86_64"
-	@echo "  build-linux-arm64   - Build for Linux ARM64"
-	@echo "  build-darwin-amd64  - Build for macOS x86_64"
-	@echo "  build-darwin-arm64  - Build for macOS ARM64 (Apple Silicon M1/M2)"
+	@echo "Distribution:"
+	@echo "  docker-build     - Build Docker images (recommended for distribution)"
+	@echo "  NOTE: Cross-platform binaries removed - use Docker or build on target platform"
+	@echo ""
+	@echo "Testing:"
+	@echo "  test                    - Run all unit tests (CGO_ENABLED=1)"
+	@echo "  test-integration        - Run integration tests with etcd (auto cleanup)"
+	@echo "  test-integration-cleanup - Manually cleanup integration test environment"
 	@echo ""
 	@echo "Other targets:"
 	@echo "  proto          - Generate protobuf code"
-	@echo "  test           - Run all tests"
 	@echo "  clean          - Clean build artifacts"
 	@echo "  deps           - Download dependencies"
 	@echo "  fmt            - Format code"
