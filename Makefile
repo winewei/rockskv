@@ -106,14 +106,18 @@ test-metadata:
 # 运行集成测试（自动启动和清理 etcd）
 test-integration:
 	@echo "Starting etcd for integration tests..."
-	@./scripts/start-etcd.sh > /tmp/etcd-test.log 2>&1 & echo $$! > /tmp/etcd-test.pid
-	@sleep 3
+	@mkdir -p .pids logs
+	@ETCD_DATA_DIR=./data/etcd-test \
+		ETCD_PID_FILE=./.pids/etcd-test.pid \
+		ETCD_LOG_FILE=./logs/etcd-test.log \
+		./scripts/start-etcd.sh || exit 1
+	@sleep 2
 	@if ! lsof -ti:2379 > /dev/null 2>&1; then \
 		echo "❌ etcd failed to start"; \
-		cat /tmp/etcd-test.log; \
+		cat ./logs/etcd-test.log; \
+		make test-integration-cleanup; \
 		exit 1; \
 	fi
-	@echo "✅ etcd started (PID: $$(cat /tmp/etcd-test.pid))"
 	@echo "Running integration tests..."
 	@CGO_ENABLED=1 $(GOTEST) -v -tags integration ./pkg/storage/... ./pkg/metadata/... || (make test-integration-cleanup && exit 1)
 	@make test-integration-cleanup
@@ -121,12 +125,12 @@ test-integration:
 # 清理集成测试环境
 test-integration-cleanup:
 	@echo "Cleaning up integration test environment..."
-	@if [ -f /tmp/etcd-test.pid ]; then \
-		kill $$(cat /tmp/etcd-test.pid) 2>/dev/null || true; \
-		rm -f /tmp/etcd-test.pid; \
+	@if [ -f .pids/etcd-test.pid ]; then \
+		kill $$(cat .pids/etcd-test.pid) 2>/dev/null || true; \
+		rm -f .pids/etcd-test.pid; \
 	fi
 	@lsof -ti:2379,2380 | xargs kill -9 2>/dev/null || true
-	@rm -rf ./data/etcd /tmp/etcd-test.log
+	@rm -rf ./data/etcd-test ./logs/etcd-test.log
 	@echo "✅ Cleanup complete"
 
 # 清理
