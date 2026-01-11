@@ -254,6 +254,55 @@ docker-compose up -d etcd
 ./bin/darwin-arm64/rockskv-cli mget k1 k2
 ```
 
+## SDK Integration
+
+RocksKV provides SDKs for multiple languages via gRPC. All SDKs use `proto/rockskv.proto`.
+
+### Python
+
+```bash
+pip install grpcio grpcio-tools
+cd sdk/python
+python -m grpc_tools.protoc -I../../proto --python_out=rockskv --grpc_python_out=rockskv ../../proto/rockskv.proto
+```
+
+```python
+from rockskv import RocksKVClient
+
+with RocksKVClient(["localhost:8000"]) as client:
+    client.put("hello", "world")
+    print(client.get("hello"))  # world
+```
+
+### Go
+
+```go
+import "github.com/winewei/rockskv/sdk/go/rockskv"
+
+client, _ := rockskv.NewClient(rockskv.WithAddrs("localhost:8000"))
+defer client.Close()
+
+client.Put(ctx, "hello", "world")
+value, _ := client.Get(ctx, "hello")
+```
+
+### Java
+
+```java
+RocksKVClient client = RocksKVClient.builder()
+    .addAddress("localhost:8000")
+    .build();
+
+client.put("hello", "world");
+String value = client.get("hello").orElse(null);
+```
+
+### Other Languages
+
+Generate gRPC client from `proto/rockskv.proto` using protoc.
+
+See `sdk/` directory for complete documentation and examples.
+
 ## Code Patterns
 
 - Logging: Use `common.NewLogger("component-name")` (zap-based, outputs to stderr)
