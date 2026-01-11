@@ -54,17 +54,54 @@ All SDKs provide:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Connection String Format
+## Connection URI Format
+
+All SDKs support MongoDB-style connection URIs:
 
 ```
-rockskv://host1:8000,host2:8001?timeout=5s&pool_size=10
+rockskv://host1:port1,host2:port2,host3:port3[?options]
 ```
+
+### Examples
+
+```
+# Single node
+rockskv://localhost:8000
+
+# Multiple nodes (recommended for production)
+rockskv://node1:8000,node2:8000,node3:8000
+
+# With options
+rockskv://localhost:8000,localhost:8001?timeout=5000&retryCount=3&poolSize=20
+```
+
+### URI Options
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `timeout` | `5s` | Request timeout |
-| `pool_size` | `10` | Connection pool size per host |
-| `retry` | `3` | Max retry attempts |
+| `timeout` | `5000` | Request timeout in milliseconds |
+| `retryCount` | `3` | Max retry attempts |
+| `retryDelay` | `100` | Initial retry delay in milliseconds |
+| `maxRetryDelay` | `2000` | Max retry delay in milliseconds |
+| `poolSize` | `10` | Connection pool size per host |
+
+### Usage by Language
+
+**Go:**
+```go
+client, err := rockskv.NewClientFromURI("rockskv://localhost:8000,localhost:8001")
+```
+
+**Python:**
+```python
+from rockskv import create_client_from_uri
+client = create_client_from_uri("rockskv://localhost:8000,localhost:8001")
+```
+
+**Java:**
+```java
+RocksKVClient client = ConnectionUri.createClient("rockskv://localhost:8000,localhost:8001");
+```
 
 ## Examples
 
