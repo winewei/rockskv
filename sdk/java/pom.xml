@@ -64,7 +64,13 @@
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
             <version>2.10.1</version>
-            <scope>test</scope>
+        </dependency>
+
+        <!-- Annotations for generated code -->
+        <dependency>
+            <groupId>javax.annotation</groupId>
+            <artifactId>javax.annotation-api</artifactId>
+            <version>1.3.2</version>
         </dependency>
 
         <!-- Testing -->
@@ -97,6 +103,16 @@
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+
+            <!-- Exec plugin for running examples -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <configuration>
+                    <mainClass>com.rockskv.examples.BasicUsage</mainClass>
+                </configuration>
             </plugin>
         </plugins>
 

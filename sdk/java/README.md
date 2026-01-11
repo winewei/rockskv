@@ -126,12 +126,37 @@ try {
 }
 ```
 
-## Generate Proto Files
+## Building from Source
 
 ```bash
-# Using protoc
+# Build with Maven (generates proto files automatically)
+cd sdk/java
+mvn clean compile
+
+# Run the example
+mvn exec:java -Dexec.mainClass="com.rockskv.examples.BasicUsage"
+```
+
+## Generate Proto Files Manually
+
+If you prefer to generate proto files manually:
+
+```bash
+# Using protoc (requires protoc and grpc-java plugin)
 protoc -I../../proto \
     --java_out=src/main/java \
     --grpc-java_out=src/main/java \
     ../../proto/rockskv.proto
+```
+
+## Project Structure
+
+```
+sdk/java/
+├── pom.xml                                    # Maven configuration
+└── src/main/java/com/rockskv/
+    ├── ClientConfig.java                      # Client configuration
+    ├── RocksKVClient.java                     # Main client implementation
+    └── examples/
+        └── BasicUsage.java                    # Usage example
 ```

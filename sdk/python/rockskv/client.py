@@ -1,5 +1,7 @@
 """RocksKV client implementation."""
 
+from __future__ import annotations
+
 import random
 import time
 from typing import Dict, List, Optional, Union
