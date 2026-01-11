@@ -121,6 +121,9 @@ type FieldUpdate struct {
 	IsDelete  bool
 }
 
+// FieldBatch format version for backward compatibility
+const FieldBatchFormatVersion byte = 1
+
 // FieldBatch represents a batch of field updates for a single document
 type FieldBatch struct {
 	PartitionID uint32 // Partition ID for replication context
@@ -129,9 +132,12 @@ type FieldBatch struct {
 }
 
 // Encode serializes the field batch for command log
-// Format: partition_id(4) + pk_len(4) + pk + update_count(4) + [field_len(2) + field + is_delete(1) + value_len(4) + value]...
+// Format: version(1) + partition_id(4) + pk_len(4) + pk + update_count(4) + [field_len(2) + field + is_delete(1) + value_len(4) + value]...
 func (fb *FieldBatch) Encode() []byte {
 	buf := new(bytes.Buffer)
+
+	// Write version byte for future compatibility
+	buf.WriteByte(FieldBatchFormatVersion)
 
 	// Write partition ID
 	binary.Write(buf, binary.BigEndian, fb.PartitionID)
@@ -164,13 +170,48 @@ func (fb *FieldBatch) Encode() []byte {
 }
 
 // DecodeFieldBatch deserializes a field batch from bytes
+// Supports both versioned (v1+) and legacy (v0) formats for backward compatibility
 func DecodeFieldBatch(data []byte) (*FieldBatch, error) {
-	if len(data) < 12 { // partition_id(4) + pk_len(4) + count(4)
+	if len(data) < 1 {
 		return nil, fmt.Errorf("field batch data too short")
 	}
 
-	buf := bytes.NewReader(data)
+	// Check version byte
+	version := data[0]
 
+	switch version {
+	case FieldBatchFormatVersion:
+		return decodeFieldBatchV1(data[1:])
+	default:
+		// Assume legacy format (no version byte) if version byte looks like partition ID
+		// Legacy format starts with partition_id(4), so first byte would be 0 for partition < 256
+		// or higher values. Version 1 is 0x01.
+		// If first 4 bytes could be a reasonable partition ID, treat as legacy
+		if len(data) >= 12 {
+			return decodeFieldBatchLegacy(data)
+		}
+		return nil, fmt.Errorf("unsupported field batch version: %d", version)
+	}
+}
+
+// decodeFieldBatchV1 decodes version 1 format (after version byte)
+func decodeFieldBatchV1(data []byte) (*FieldBatch, error) {
+	if len(data) < 12 { // partition_id(4) + pk_len(4) + count(4)
+		return nil, fmt.Errorf("field batch v1 data too short")
+	}
+
+	buf := bytes.NewReader(data)
+	return decodeFieldBatchContent(buf)
+}
+
+// decodeFieldBatchLegacy decodes legacy format (no version byte)
+func decodeFieldBatchLegacy(data []byte) (*FieldBatch, error) {
+	buf := bytes.NewReader(data)
+	return decodeFieldBatchContent(buf)
+}
+
+// decodeFieldBatchContent decodes the field batch content from a reader
+func decodeFieldBatchContent(buf *bytes.Reader) (*FieldBatch, error) {
 	// Read partition ID
 	var partitionID uint32
 	if err := binary.Read(buf, binary.BigEndian, &partitionID); err != nil {
@@ -283,15 +324,26 @@ func (fs *FieldStorage) GetAllFields(pk []byte) (map[string][]byte, error) {
 			break
 		}
 
-		// Extract field name from key (after the prefix)
-		fieldName := string(key.Data()[len(prefix):])
+		// Validate and parse the complete field key to ensure correct format
+		fk, err := DecodeFieldKey(key.Data())
+		if err != nil {
+			key.Free()
+			continue // Skip malformed keys
+		}
+
+		// Verify partition ID and PK match (extra safety check)
+		if fk.PartitionID != fs.partitionID || !bytes.Equal(fk.PrimaryKey, pk) {
+			key.Free()
+			continue
+		}
+
 		value := iter.Value()
 
 		// Copy value since iterator reuses memory
 		valueCopy := make([]byte, len(value.Data()))
 		copy(valueCopy, value.Data())
 
-		fields[fieldName] = valueCopy
+		fields[fk.FieldName] = valueCopy
 
 		key.Free()
 		value.Free()

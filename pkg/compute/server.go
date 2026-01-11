@@ -332,23 +332,25 @@ func (s *Server) GetField(ctx context.Context, req *pb.GetFieldRequest) (*pb.Get
 	}
 
 	// Try primary first
-	resp, err := s.doGetField(ctx, primary, req.PrimaryKey, req.FieldName, partitionID)
-	if err == nil {
+	var primaryErr, replicaErr error
+	resp, primaryErr := s.doGetField(ctx, primary, req.PrimaryKey, req.FieldName, partitionID)
+	if primaryErr == nil {
 		return resp, nil
 	}
 
 	s.logger.Warn("Primary get_field failed, trying replica",
 		zap.String("primary", primary),
-		zap.Error(err),
+		zap.Error(primaryErr),
 	)
 
 	// Fallback to replica
-	resp, err = s.doGetField(ctx, replica, req.PrimaryKey, req.FieldName, partitionID)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "get_field failed on both replicas: %v", err)
+	resp, replicaErr = s.doGetField(ctx, replica, req.PrimaryKey, req.FieldName, partitionID)
+	if replicaErr == nil {
+		return resp, nil
 	}
 
-	return resp, nil
+	// Both failed - include both error messages for debugging
+	return nil, status.Errorf(codes.Internal, "get_field failed on primary (%v) and replica (%v)", primaryErr, replicaErr)
 }
 
 // doGetField performs a get field operation on a specific node

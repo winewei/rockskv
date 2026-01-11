@@ -282,13 +282,100 @@ func (cl *CommandLog) ReadFrom(fromSeq uint64, limit int) ([]*CommandEntry, erro
 	cl.mu.RLock()
 	defer cl.mu.RUnlock()
 
+	// Try to use index for fast lookup
+	var startPos *logPosition
+	for seq := fromSeq; seq <= cl.currentSeq && startPos == nil; seq++ {
+		if pos, ok := cl.index[seq]; ok {
+			startPos = &pos
+			break
+		}
+	}
+
+	if startPos != nil {
+		// Use index-based fast read
+		indexEntries, err := cl.readFromIndex(startPos, fromSeq, limit)
+		if err == nil && len(indexEntries) > 0 {
+			return indexEntries, nil
+		}
+		// Fallback to full scan on error
+	}
+
+	// Full scan fallback (for when index is not available)
+	return cl.readFromFullScan(fromSeq, limit)
+}
+
+// readFromIndex reads entries starting from an indexed position
+func (cl *CommandLog) readFromIndex(startPos *logPosition, fromSeq uint64, limit int) ([]*CommandEntry, error) {
 	entries := make([]*CommandEntry, 0, limit)
 
-	// Find all log files
+	// Find the file with matching fileNum
 	files, err := filepath.Glob(filepath.Join(cl.logDir, "*"+LogFileSuffix))
 	if err != nil {
 		return nil, err
 	}
+
+	sort.Strings(files)
+
+	// Find starting file index
+	startFileIdx := -1
+	for i, file := range files {
+		if parseFileNum(file) == startPos.fileNum {
+			startFileIdx = i
+			break
+		}
+	}
+
+	if startFileIdx == -1 {
+		// File not found, fallback to full scan
+		return nil, fmt.Errorf("indexed file not found")
+	}
+
+	// Read from starting file at offset
+	for i := startFileIdx; i < len(files) && len(entries) < limit; i++ {
+		f, err := os.Open(files[i])
+		if err != nil {
+			continue
+		}
+
+		// Seek to offset if this is the starting file
+		if i == startFileIdx && startPos.offset > 0 {
+			if _, err := f.Seek(startPos.offset, 0); err != nil {
+				f.Close()
+				continue
+			}
+		}
+
+		for len(entries) < limit {
+			entry, err := DecodeCommandEntry(f)
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				cl.logger.Warn("Failed to decode entry", zap.Error(err))
+				break
+			}
+
+			if entry.Sequence >= fromSeq {
+				entries = append(entries, entry)
+			}
+		}
+
+		f.Close()
+	}
+
+	return entries, nil
+}
+
+// readFromFullScan reads entries by scanning all log files
+func (cl *CommandLog) readFromFullScan(fromSeq uint64, limit int) ([]*CommandEntry, error) {
+	entries := make([]*CommandEntry, 0, limit)
+
+	files, err := filepath.Glob(filepath.Join(cl.logDir, "*"+LogFileSuffix))
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Strings(files)
 
 	for _, file := range files {
 		f, err := os.Open(file)
@@ -296,7 +383,6 @@ func (cl *CommandLog) ReadFrom(fromSeq uint64, limit int) ([]*CommandEntry, erro
 			continue
 		}
 
-		// Read entries from file
 		for len(entries) < limit {
 			entry, err := DecodeCommandEntry(f)
 			if err == io.EOF {
@@ -394,11 +480,7 @@ func (cl *CommandLog) recover() error {
 	// Find the last entry to get current sequence and rebuild index
 	var maxSeq uint64
 	for _, file := range files {
-		fileInfo, err := os.Stat(file)
-		if err != nil {
-			continue
-		}
-		fileNum := fileInfo.ModTime().UnixNano()
+		fileNum := parseFileNum(file)
 
 		f, err := os.Open(file)
 		if err != nil {
@@ -487,27 +569,38 @@ func (cl *CommandLog) syncLoop() {
 	for {
 		select {
 		case <-cl.syncTicker.C:
+			if cl.closed.Load() {
+				return
+			}
 			cl.Sync()
 		case <-cl.syncCh:
+			if cl.closed.Load() {
+				return
+			}
 			cl.Sync()
-		}
-
-		if cl.closed.Load() {
-			return
 		}
 	}
 }
 
 // getFileNum returns current file number (for indexing)
+// Uses the timestamp from filename for consistency (ModTime can change during writes)
 func (cl *CommandLog) getFileNum() int64 {
 	if cl.currentFile == nil {
 		return 0
 	}
-	info, err := cl.currentFile.Stat()
-	if err != nil {
-		return 0
-	}
-	return info.ModTime().UnixNano()
+	name := filepath.Base(cl.currentFile.Name())
+	// Parse filename: "00000001234567890.cmdlog"
+	var fileNum int64
+	fmt.Sscanf(name, "%020d", &fileNum)
+	return fileNum
+}
+
+// parseFileNum extracts the file number from a log file path
+func parseFileNum(path string) int64 {
+	name := filepath.Base(path)
+	var fileNum int64
+	fmt.Sscanf(name, "%020d", &fileNum)
+	return fileNum
 }
 
 // ReplayTo replays all commands from the log to a RocksDB instance

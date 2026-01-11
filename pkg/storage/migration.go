@@ -195,7 +195,8 @@ func (m *MigrationManager) MigratePartition(ctx context.Context, partitionID uin
 	return nil
 }
 
-// DeletePartitionData deletes all data for a partition
+// DeletePartitionData deletes all data for a partition using batched deletes
+// to avoid memory issues with large partitions
 func (m *MigrationManager) DeletePartitionData(partitionID uint32) error {
 	pm := m.server.partitionManager
 	db := m.server.db
@@ -206,31 +207,41 @@ func (m *MigrationManager) DeletePartitionData(partitionID uint32) error {
 
 	startKey, endKey := GetPartitionRange(partitionID)
 
-	// Create iterator to find all keys
-	iter := db.NewIterator()
-	defer iter.Close()
-
-	batch := grocksdb.NewWriteBatch()
-	defer batch.Destroy()
-
+	const batchSize = 10000 // Process 10K keys per batch to limit memory usage
 	keyCount := int64(0)
-	for iter.Seek(startKey); iter.Valid(); iter.Next() {
-		key := iter.Key()
-		if compareBytes(key.Data(), endKey) >= 0 {
-			key.Free()
-			break
-		}
-
-		batch.Delete(key.Data())
-		key.Free()
-		keyCount++
-	}
 
 	writeOpts := grocksdb.NewDefaultWriteOptions()
 	defer writeOpts.Destroy()
 
-	if err := m.server.db.db.Write(writeOpts, batch); err != nil {
-		return fmt.Errorf("failed to delete partition data: %w", err)
+	for {
+		batch := grocksdb.NewWriteBatch()
+		count := 0
+
+		iter := db.NewIterator()
+		for iter.Seek(startKey); iter.Valid() && count < batchSize; iter.Next() {
+			key := iter.Key()
+			if compareBytes(key.Data(), endKey) >= 0 {
+				key.Free()
+				break
+			}
+
+			batch.Delete(key.Data())
+			key.Free()
+			count++
+		}
+		iter.Close()
+
+		if count == 0 {
+			batch.Destroy()
+			break
+		}
+
+		if err := db.db.Write(writeOpts, batch); err != nil {
+			batch.Destroy()
+			return fmt.Errorf("failed to delete partition data batch: %w", err)
+		}
+		batch.Destroy()
+		keyCount += int64(count)
 	}
 
 	// Trigger compaction to reclaim space

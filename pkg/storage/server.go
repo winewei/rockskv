@@ -602,6 +602,11 @@ func (s *Server) BatchPut(ctx context.Context, req *pb.StorageBatchPutRequest) (
 		}, nil
 	}
 
+	// Enqueue each item for replication to Replica
+	for _, item := range req.Items {
+		s.enqueueReplication(req.PartitionId, item.Key, item.Value, false)
+	}
+
 	common.StorageOperations.WithLabelValues("batch_put", "success").Inc()
 	return &pb.StorageBatchPutResponse{
 		Success: true,

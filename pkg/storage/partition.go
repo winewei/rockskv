@@ -67,6 +67,7 @@ func MakePartitionKey(partitionID uint32, key []byte) []byte {
 }
 
 // ParsePartitionKey parses a partition key back to partition ID and original key
+// Returns (partitionID, originalKey, isFieldKey, error)
 func ParsePartitionKey(storageKey []byte) (uint32, []byte, error) {
 	prefixLen := len(PartitionKeyPrefix) + 4
 	if len(storageKey) < prefixLen {
@@ -77,6 +78,33 @@ func ParsePartitionKey(storageKey []byte) (uint32, []byte, error) {
 	key := storageKey[prefixLen:]
 
 	return partitionID, key, nil
+}
+
+// FieldKeyMarkerByte is the marker byte for field keys ('f')
+// Note: This is duplicated from field_storage.go to avoid circular dependency
+const FieldKeyMarkerByte byte = 'f'
+
+// ParsePartitionKeyEx parses a partition key with field key detection
+// Returns (partitionID, originalKey, isFieldKey, error)
+func ParsePartitionKeyEx(storageKey []byte) (uint32, []byte, bool, error) {
+	prefixLen := len(PartitionKeyPrefix) + 4 // "p:" + 4 bytes
+	if len(storageKey) < prefixLen {
+		return 0, nil, false, fmt.Errorf("invalid storage key: too short")
+	}
+
+	partitionID := binary.BigEndian.Uint32(storageKey[len(PartitionKeyPrefix):prefixLen])
+
+	// Check if this is a field key (has ":f" marker after partition ID)
+	// Field key format: p:<partition_id>:f<pk_len><pk><field_name>
+	if len(storageKey) > prefixLen+1 &&
+		storageKey[prefixLen] == ':' &&
+		storageKey[prefixLen+1] == FieldKeyMarkerByte {
+		// This is a field key - return the raw suffix for field key handling
+		return partitionID, storageKey[prefixLen:], true, nil
+	}
+
+	// Regular KV key
+	return partitionID, storageKey[prefixLen:], false, nil
 }
 
 // GetPartitionRange returns the key range for a partition

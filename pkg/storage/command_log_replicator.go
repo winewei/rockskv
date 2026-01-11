@@ -5,6 +5,9 @@ package storage
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,6 +29,9 @@ const (
 
 	// CLReplicationTimeout is the timeout for replication RPC
 	CLReplicationTimeout = 5 * time.Second
+
+	// ReplicationCheckpointFile stores the last replicated sequence
+	ReplicationCheckpointFile = "replication.checkpoint"
 )
 
 // CommandLogReplicator handles command-log-based replication for a partition
@@ -35,6 +41,7 @@ type CommandLogReplicator struct {
 	replicaAddr string
 	isPrimary   bool
 	logger      *zap.Logger
+	logDir      string // Directory for command log and checkpoint files
 
 	// Persistent command log
 	commandLog *CommandLog
@@ -64,20 +71,25 @@ func NewCommandLogReplicator(partitionID uint32, isPrimary bool, replicaAddr str
 		return nil, err
 	}
 
-	// Initialize replicatedSeq to current sequence (assume all persisted commands are replicated)
-	// In production, this should be read from checkpoint
-	replicatedSeq := commandLog.GetCurrentSequence()
+	// Build partition-specific log directory
+	partitionLogDir := filepath.Join(logDir, "partition_"+strconv.FormatUint(uint64(partitionID), 10))
 
-	return &CommandLogReplicator{
-		partitionID:   partitionID,
-		replicaAddr:   replicaAddr,
-		isPrimary:     isPrimary,
-		logger:        common.NewLogger("cmd-log-replicator"),
-		commandLog:    commandLog,
-		replicatedSeq: replicatedSeq,
-		ctx:           ctx,
-		cancel:        cancel,
-	}, nil
+	clr := &CommandLogReplicator{
+		partitionID: partitionID,
+		replicaAddr: replicaAddr,
+		isPrimary:   isPrimary,
+		logger:      common.NewLogger("cmd-log-replicator"),
+		logDir:      partitionLogDir,
+		commandLog:  commandLog,
+		ctx:         ctx,
+		cancel:      cancel,
+	}
+
+	// Load replicatedSeq from checkpoint (persisted state)
+	// This ensures we don't re-replicate already-replicated entries after restart
+	clr.replicatedSeq = clr.loadCheckpoint()
+
+	return clr, nil
 }
 
 // Start starts the command log replicator
@@ -270,9 +282,10 @@ func (clr *CommandLogReplicator) syncToReplica() {
 		return
 	}
 
-	// Update replicated sequence
+	// Update replicated sequence and persist checkpoint
 	lastSeq := entries[len(entries)-1].Sequence
 	atomic.StoreUint64(&clr.replicatedSeq, lastSeq)
+	clr.saveCheckpoint(lastSeq)
 }
 
 // sendBatch sends a batch of entries to the replica
@@ -364,4 +377,63 @@ func (clr *CommandLogReplicator) Sync() error {
 		return nil
 	}
 	return clr.commandLog.Sync()
+}
+
+// loadCheckpoint loads the last replicated sequence from checkpoint file
+// Returns 0 if checkpoint doesn't exist (start from beginning)
+func (clr *CommandLogReplicator) loadCheckpoint() uint64 {
+	checkpointPath := filepath.Join(clr.logDir, ReplicationCheckpointFile)
+	data, err := os.ReadFile(checkpointPath)
+	if err != nil {
+		// No checkpoint file - either first run or Replica node
+		return 0
+	}
+
+	seq, err := strconv.ParseUint(string(data), 10, 64)
+	if err != nil {
+		clr.logger.Warn("Failed to parse checkpoint file, starting from 0",
+			zap.Uint32("partition_id", clr.partitionID),
+			zap.Error(err),
+		)
+		return 0
+	}
+
+	clr.logger.Info("Loaded replication checkpoint",
+		zap.Uint32("partition_id", clr.partitionID),
+		zap.Uint64("replicated_seq", seq),
+	)
+
+	return seq
+}
+
+// saveCheckpoint persists the replicated sequence to checkpoint file
+func (clr *CommandLogReplicator) saveCheckpoint(seq uint64) {
+	checkpointPath := filepath.Join(clr.logDir, ReplicationCheckpointFile)
+
+	// Ensure directory exists
+	if err := os.MkdirAll(clr.logDir, 0755); err != nil {
+		clr.logger.Warn("Failed to create checkpoint directory",
+			zap.Uint32("partition_id", clr.partitionID),
+			zap.Error(err),
+		)
+		return
+	}
+
+	// Write checkpoint atomically using temp file + rename
+	tempPath := checkpointPath + ".tmp"
+	if err := os.WriteFile(tempPath, []byte(strconv.FormatUint(seq, 10)), 0644); err != nil {
+		clr.logger.Warn("Failed to write checkpoint temp file",
+			zap.Uint32("partition_id", clr.partitionID),
+			zap.Error(err),
+		)
+		return
+	}
+
+	if err := os.Rename(tempPath, checkpointPath); err != nil {
+		clr.logger.Warn("Failed to rename checkpoint file",
+			zap.Uint32("partition_id", clr.partitionID),
+			zap.Error(err),
+		)
+		os.Remove(tempPath)
+	}
 }
