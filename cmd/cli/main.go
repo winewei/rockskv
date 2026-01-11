@@ -457,10 +457,7 @@ func runPartitions(args []string) {
 		fmt.Println("  " + strings.Repeat("-", 80))
 
 		// Sort partitions
-		var partitions []*pb.PartitionInfo
-		for _, p := range resp.RouteTable.Partitions {
-			partitions = append(partitions, p)
-		}
+		partitions := append([]*pb.PartitionInfo{}, resp.RouteTable.Partitions...)
 		sort.Slice(partitions, func(i, j int) bool {
 			return partitions[i].PartitionId < partitions[j].PartitionId
 		})
