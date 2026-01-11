@@ -32,16 +32,18 @@ type ServerConfig struct {
 	MetadataAddr string         `mapstructure:"metadata_addr"`
 	RocksDB      *RocksDBConfig `mapstructure:"rocksdb"`
 	SSTDir       string         `mapstructure:"sst_dir"`
+	CommandLogDir string        `mapstructure:"command_log_dir"`
 }
 
 // DefaultServerConfig returns a default server configuration
 func DefaultServerConfig() *ServerConfig {
 	return &ServerConfig{
-		NodeID:       "storage-1",
-		ListenAddr:   ":9001",
-		MetadataAddr: "localhost:9000",
-		RocksDB:      DefaultRocksDBConfig(),
-		SSTDir:       "/tmp/rockskv/sst",
+		NodeID:        "storage-1",
+		ListenAddr:    ":9001",
+		MetadataAddr:  "localhost:9000",
+		RocksDB:       DefaultRocksDBConfig(),
+		SSTDir:        "/tmp/rockskv/sst",
+		CommandLogDir: "/tmp/rockskv/cmdlog",
 	}
 }
 
@@ -64,8 +66,8 @@ type Server struct {
 	leaseCtx        context.Context
 	leaseCancel     context.CancelFunc
 
-	// Replication: maps partition ID to WAL replicator
-	replicators   map[uint32]*WALReplicator
+	// Replication: maps partition ID to command log replicator
+	replicators   map[uint32]*CommandLogReplicator
 	replicatorsMu sync.RWMutex
 }
 
@@ -94,6 +96,11 @@ func NewServer(config *ServerConfig) (*Server, error) {
 	// Create lease context
 	leaseCtx, leaseCancel := context.WithCancel(context.Background())
 
+	// Create command log directory
+	if err := os.MkdirAll(config.CommandLogDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create command log directory: %w", err)
+	}
+
 	server := &Server{
 		config:           config,
 		db:               db,
@@ -102,7 +109,7 @@ func NewServer(config *ServerConfig) (*Server, error) {
 		partitionLeases:  make(map[uint32]int64),
 		leaseCtx:         leaseCtx,
 		leaseCancel:      leaseCancel,
-		replicators:      make(map[uint32]*WALReplicator),
+		replicators:      make(map[uint32]*CommandLogReplicator),
 	}
 
 	return server, nil
@@ -964,8 +971,21 @@ func (s *Server) enqueueReplication(partitionID uint32, key, value []byte, isDel
 		return
 	}
 
-	// Use WAL-based async replication
-	replicator.Append(key, value, isDelete)
+	// Use command-log-based async replication
+	var err error
+	if isDelete {
+		_, err = replicator.AppendDelete(key)
+	} else {
+		_, err = replicator.AppendPut(key, value)
+	}
+
+	if err != nil {
+		s.logger.Warn("Failed to append to command log",
+			zap.Uint32("partition_id", partitionID),
+			zap.Bool("is_delete", isDelete),
+			zap.Error(err),
+		)
+	}
 }
 
 // Replicate implements StorageService.Replicate (called on Replica by Primary)
@@ -1023,17 +1043,45 @@ func (s *Server) GetReplicationStatus(ctx context.Context, req *pb.GetReplicatio
 		}, nil
 	}
 
+	replicator.connMu.RLock()
+	replicaAddr := replicator.replicaAddr
+	replicator.connMu.RUnlock()
+
 	return &pb.GetReplicationStatusResponse{
 		PartitionId:     req.PartitionId,
 		IsPrimary:       replicator.isPrimary,
 		CurrentOffset:   int64(replicator.GetCurrentSequence()),
 		CommittedOffset: int64(replicator.GetReplicatedSequence()),
 		ReplicationLag:  int64(replicator.GetReplicationLag()),
-		ReplicaAddr:     replicator.replicaAddr,
+		ReplicaAddr:     replicaAddr,
 	}, nil
 }
 
-// initializeReplicator creates a WAL replicator for a partition
+// RecoverPartition recovers a partition from its command log
+func (s *Server) RecoverPartition(partitionID uint32) error {
+	s.replicatorsMu.RLock()
+	replicator, exists := s.replicators[partitionID]
+	s.replicatorsMu.RUnlock()
+
+	if !exists || replicator == nil {
+		return fmt.Errorf("no replicator found for partition %d", partitionID)
+	}
+
+	// Replay command log to RocksDB
+	lastSeq, err := replicator.ReplayTo(s.db, 0)
+	if err != nil {
+		return fmt.Errorf("failed to replay command log: %w", err)
+	}
+
+	s.logger.Info("Partition recovered from command log",
+		zap.Uint32("partition_id", partitionID),
+		zap.Uint64("last_seq", lastSeq),
+	)
+
+	return nil
+}
+
+// initializeReplicator creates a command log replicator for a partition
 func (s *Server) initializeReplicator(partitionID uint32, isPrimary bool, replicaAddr string) {
 	s.replicatorsMu.Lock()
 	defer s.replicatorsMu.Unlock()
@@ -1043,9 +1091,17 @@ func (s *Server) initializeReplicator(partitionID uint32, isPrimary bool, replic
 		existing.Stop()
 	}
 
-	replicator := NewWALReplicator(partitionID, isPrimary, replicaAddr)
+	replicator, err := NewCommandLogReplicator(partitionID, isPrimary, replicaAddr, s.config.CommandLogDir)
+	if err != nil {
+		s.logger.Warn("Failed to create command log replicator",
+			zap.Uint32("partition_id", partitionID),
+			zap.Error(err),
+		)
+		return
+	}
+
 	if err := replicator.Start(); err != nil {
-		s.logger.Warn("Failed to start WAL replicator",
+		s.logger.Warn("Failed to start command log replicator",
 			zap.Uint32("partition_id", partitionID),
 			zap.Error(err),
 		)
