@@ -342,7 +342,9 @@ func (ms *MigrationScheduler) executeMigration(task *MigrationTask) {
 
 	ctx := ms.ctx
 	if task.cancel != nil {
-		ctx, _ = context.WithTimeout(ms.ctx, DefaultMigrationTimeout)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ms.ctx, DefaultMigrationTimeout)
+		defer cancel()
 	}
 
 	ms.logger.Info("Starting migration",
