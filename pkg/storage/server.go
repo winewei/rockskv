@@ -373,6 +373,87 @@ func (s *Server) Delete(ctx context.Context, req *pb.StorageDeleteRequest) (*pb.
 	}, nil
 }
 
+// Patch implements StorageService.Patch - sparse update (partial modification)
+func (s *Server) Patch(ctx context.Context, req *pb.StoragePatchRequest) (*pb.StoragePatchResponse, error) {
+	start := time.Now()
+	defer func() {
+		common.StorageLatency.WithLabelValues("patch").Observe(time.Since(start).Seconds())
+	}()
+
+	// Check if we have the partition
+	if !s.partitionManager.HasPartition(req.PartitionId) {
+		common.StorageOperations.WithLabelValues("patch", "partition_not_found").Inc()
+		return &pb.StoragePatchResponse{
+			Success: false,
+			Error:   pb.ErrorCode_PARTITION_NOT_FOUND,
+		}, nil
+	}
+
+	// Get current value
+	currentValue, _, err := s.partitionManager.Get(req.Key, req.PartitionId)
+	if err != nil {
+		s.logger.Error("Patch get failed",
+			zap.Error(err),
+			zap.Uint32("partition_id", req.PartitionId),
+		)
+		common.StorageOperations.WithLabelValues("patch", "error").Inc()
+		return &pb.StoragePatchResponse{
+			Success: false,
+			Error:   pb.ErrorCode_INTERNAL_ERROR,
+		}, nil
+	}
+
+	// Decode and apply patch
+	patch, err := DecodePatch(req.PatchData)
+	if err != nil {
+		s.logger.Error("Patch decode failed",
+			zap.Error(err),
+			zap.Uint32("partition_id", req.PartitionId),
+		)
+		common.StorageOperations.WithLabelValues("patch", "error").Inc()
+		return &pb.StoragePatchResponse{
+			Success: false,
+			Error:   pb.ErrorCode_INTERNAL_ERROR,
+		}, nil
+	}
+
+	newValue, err := patch.Apply(currentValue)
+	if err != nil {
+		s.logger.Error("Patch apply failed",
+			zap.Error(err),
+			zap.Uint32("partition_id", req.PartitionId),
+		)
+		common.StorageOperations.WithLabelValues("patch", "error").Inc()
+		return &pb.StoragePatchResponse{
+			Success: false,
+			Error:   pb.ErrorCode_INTERNAL_ERROR,
+		}, nil
+	}
+
+	// Write new value
+	if err := s.partitionManager.Put(req.Key, newValue, req.PartitionId); err != nil {
+		s.logger.Error("Patch put failed",
+			zap.Error(err),
+			zap.Uint32("partition_id", req.PartitionId),
+		)
+		common.StorageOperations.WithLabelValues("patch", "error").Inc()
+		return &pb.StoragePatchResponse{
+			Success: false,
+			Error:   pb.ErrorCode_INTERNAL_ERROR,
+		}, nil
+	}
+
+	// Enqueue patch for async replication (if Primary)
+	s.enqueuePatchReplication(req.PartitionId, req.Key, req.PatchData)
+
+	common.StorageOperations.WithLabelValues("patch", "success").Inc()
+	return &pb.StoragePatchResponse{
+		Success:  true,
+		NewValue: newValue,
+		Error:    pb.ErrorCode_OK,
+	}, nil
+}
+
 // BatchPut implements StorageService.BatchPut
 func (s *Server) BatchPut(ctx context.Context, req *pb.StorageBatchPutRequest) (*pb.StorageBatchPutResponse, error) {
 	start := time.Now()
@@ -988,6 +1069,24 @@ func (s *Server) enqueueReplication(partitionID uint32, key, value []byte, isDel
 	}
 }
 
+// enqueuePatchReplication adds a patch entry to the replication queue
+func (s *Server) enqueuePatchReplication(partitionID uint32, key, patchData []byte) {
+	s.replicatorsMu.RLock()
+	replicator, exists := s.replicators[partitionID]
+	s.replicatorsMu.RUnlock()
+
+	if !exists || replicator == nil {
+		return
+	}
+
+	if _, err := replicator.AppendPatch(key, patchData); err != nil {
+		s.logger.Warn("Failed to append patch to command log",
+			zap.Uint32("partition_id", partitionID),
+			zap.Error(err),
+		)
+	}
+}
+
 // Replicate implements StorageService.Replicate (called on Replica by Primary)
 func (s *Server) Replicate(ctx context.Context, req *pb.ReplicateRequest) (*pb.ReplicateResponse, error) {
 	// Check if we have the partition
@@ -1001,28 +1100,53 @@ func (s *Server) Replicate(ctx context.Context, req *pb.ReplicateRequest) (*pb.R
 	// Apply all entries
 	var lastApplied int64
 	for _, entry := range req.Entries {
-		if entry.IsDelete {
-			if err := s.partitionManager.Delete(entry.Key, req.PartitionId); err != nil {
-				return &pb.ReplicateResponse{
-					Success:           false,
-					LastAppliedOffset: lastApplied,
-					ErrorMessage:      err.Error(),
-				}, nil
+		var err error
+
+		// Use op_type if available, fall back to is_delete for backward compatibility
+		switch entry.OpType {
+		case pb.ReplicationOpType_REP_OP_DELETE:
+			err = s.partitionManager.Delete(entry.Key, req.PartitionId)
+
+		case pb.ReplicationOpType_REP_OP_PATCH:
+			// Apply patch operation
+			currentValue, _, getErr := s.partitionManager.Get(entry.Key, req.PartitionId)
+			if getErr != nil {
+				err = getErr
+				break
 			}
-		} else {
-			if err := s.partitionManager.Put(entry.Key, entry.Value, req.PartitionId); err != nil {
-				return &pb.ReplicateResponse{
-					Success:           false,
-					LastAppliedOffset: lastApplied,
-					ErrorMessage:      err.Error(),
-				}, nil
+			patch, decodeErr := DecodePatch(entry.Value)
+			if decodeErr != nil {
+				err = decodeErr
+				break
 			}
+			newValue, applyErr := patch.Apply(currentValue)
+			if applyErr != nil {
+				err = applyErr
+				break
+			}
+			err = s.partitionManager.Put(entry.Key, newValue, req.PartitionId)
+
+		case pb.ReplicationOpType_REP_OP_PUT:
+			err = s.partitionManager.Put(entry.Key, entry.Value, req.PartitionId)
+
+		default:
+			// Backward compatibility: use is_delete flag
+			if entry.IsDelete {
+				err = s.partitionManager.Delete(entry.Key, req.PartitionId)
+			} else {
+				err = s.partitionManager.Put(entry.Key, entry.Value, req.PartitionId)
+			}
+		}
+
+		if err != nil {
+			return &pb.ReplicateResponse{
+				Success:           false,
+				LastAppliedOffset: lastApplied,
+				ErrorMessage:      err.Error(),
+			}, nil
 		}
 		lastApplied = entry.Offset
 	}
-
-	// Note: WALReplicator on Replica side doesn't need offset tracking
-	// The Primary tracks replication progress via response
 
 	return &pb.ReplicateResponse{
 		Success:           true,

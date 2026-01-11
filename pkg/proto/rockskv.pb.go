@@ -287,6 +287,56 @@ func (MigrationState) EnumDescriptor() ([]byte, []int) {
 	return file_rockskv_proto_rawDescGZIP(), []int{4}
 }
 
+// ReplicationOpType defines the type of replication operation
+type ReplicationOpType int32
+
+const (
+	ReplicationOpType_REP_OP_PUT    ReplicationOpType = 0 // Full value replacement
+	ReplicationOpType_REP_OP_DELETE ReplicationOpType = 1 // Delete key
+	ReplicationOpType_REP_OP_PATCH  ReplicationOpType = 2 // Sparse update (partial modification)
+)
+
+// Enum value maps for ReplicationOpType.
+var (
+	ReplicationOpType_name = map[int32]string{
+		0: "REP_OP_PUT",
+		1: "REP_OP_DELETE",
+		2: "REP_OP_PATCH",
+	}
+	ReplicationOpType_value = map[string]int32{
+		"REP_OP_PUT":    0,
+		"REP_OP_DELETE": 1,
+		"REP_OP_PATCH":  2,
+	}
+)
+
+func (x ReplicationOpType) Enum() *ReplicationOpType {
+	p := new(ReplicationOpType)
+	*p = x
+	return p
+}
+
+func (x ReplicationOpType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ReplicationOpType) Descriptor() protoreflect.EnumDescriptor {
+	return file_rockskv_proto_enumTypes[5].Descriptor()
+}
+
+func (ReplicationOpType) Type() protoreflect.EnumType {
+	return &file_rockskv_proto_enumTypes[5]
+}
+
+func (x ReplicationOpType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ReplicationOpType.Descriptor instead.
+func (ReplicationOpType) EnumDescriptor() ([]byte, []int) {
+	return file_rockskv_proto_rawDescGZIP(), []int{5}
+}
+
 type NodeStatus int32
 
 const (
@@ -323,11 +373,11 @@ func (x NodeStatus) String() string {
 }
 
 func (NodeStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_rockskv_proto_enumTypes[5].Descriptor()
+	return file_rockskv_proto_enumTypes[6].Descriptor()
 }
 
 func (NodeStatus) Type() protoreflect.EnumType {
-	return &file_rockskv_proto_enumTypes[5]
+	return &file_rockskv_proto_enumTypes[6]
 }
 
 func (x NodeStatus) Number() protoreflect.EnumNumber {
@@ -336,7 +386,7 @@ func (x NodeStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use NodeStatus.Descriptor instead.
 func (NodeStatus) EnumDescriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{5}
+	return file_rockskv_proto_rawDescGZIP(), []int{6}
 }
 
 type MigrationPriority int32
@@ -375,11 +425,11 @@ func (x MigrationPriority) String() string {
 }
 
 func (MigrationPriority) Descriptor() protoreflect.EnumDescriptor {
-	return file_rockskv_proto_enumTypes[6].Descriptor()
+	return file_rockskv_proto_enumTypes[7].Descriptor()
 }
 
 func (MigrationPriority) Type() protoreflect.EnumType {
-	return &file_rockskv_proto_enumTypes[6]
+	return &file_rockskv_proto_enumTypes[7]
 }
 
 func (x MigrationPriority) Number() protoreflect.EnumNumber {
@@ -388,7 +438,59 @@ func (x MigrationPriority) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use MigrationPriority.Descriptor instead.
 func (MigrationPriority) EnumDescriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{6}
+	return file_rockskv_proto_rawDescGZIP(), []int{7}
+}
+
+type PatchOperation_OpType int32
+
+const (
+	PatchOperation_SET    PatchOperation_OpType = 0 // Set field value
+	PatchOperation_DELETE PatchOperation_OpType = 1 // Delete field
+	PatchOperation_INCR   PatchOperation_OpType = 2 // Increment numeric field
+	PatchOperation_APPEND PatchOperation_OpType = 3 // Append to array field
+)
+
+// Enum value maps for PatchOperation_OpType.
+var (
+	PatchOperation_OpType_name = map[int32]string{
+		0: "SET",
+		1: "DELETE",
+		2: "INCR",
+		3: "APPEND",
+	}
+	PatchOperation_OpType_value = map[string]int32{
+		"SET":    0,
+		"DELETE": 1,
+		"INCR":   2,
+		"APPEND": 3,
+	}
+)
+
+func (x PatchOperation_OpType) Enum() *PatchOperation_OpType {
+	p := new(PatchOperation_OpType)
+	*p = x
+	return p
+}
+
+func (x PatchOperation_OpType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PatchOperation_OpType) Descriptor() protoreflect.EnumDescriptor {
+	return file_rockskv_proto_enumTypes[8].Descriptor()
+}
+
+func (PatchOperation_OpType) Type() protoreflect.EnumType {
+	return &file_rockskv_proto_enumTypes[8]
+}
+
+func (x PatchOperation_OpType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PatchOperation_OpType.Descriptor instead.
+func (PatchOperation_OpType) EnumDescriptor() ([]byte, []int) {
+	return file_rockskv_proto_rawDescGZIP(), []int{6, 0}
 }
 
 type GetRequest struct {
@@ -671,6 +773,172 @@ func (x *DeleteResponse) GetSuccess() bool {
 	return false
 }
 
+// PatchOperation defines a single field operation
+type PatchOperation struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Op            PatchOperation_OpType  `protobuf:"varint,1,opt,name=op,proto3,enum=rockskv.PatchOperation_OpType" json:"op,omitempty"`
+	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`   // Field path (e.g., "name", "address.city")
+	Value         []byte                 `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"` // Value for SET/INCR/APPEND operations
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PatchOperation) Reset() {
+	*x = PatchOperation{}
+	mi := &file_rockskv_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PatchOperation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PatchOperation) ProtoMessage() {}
+
+func (x *PatchOperation) ProtoReflect() protoreflect.Message {
+	mi := &file_rockskv_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PatchOperation.ProtoReflect.Descriptor instead.
+func (*PatchOperation) Descriptor() ([]byte, []int) {
+	return file_rockskv_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *PatchOperation) GetOp() PatchOperation_OpType {
+	if x != nil {
+		return x.Op
+	}
+	return PatchOperation_SET
+}
+
+func (x *PatchOperation) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *PatchOperation) GetValue() []byte {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+// PatchRequest for sparse update (partial modification)
+type PatchRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           []byte                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Operations    []*PatchOperation      `protobuf:"bytes,2,rep,name=operations,proto3" json:"operations,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PatchRequest) Reset() {
+	*x = PatchRequest{}
+	mi := &file_rockskv_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PatchRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PatchRequest) ProtoMessage() {}
+
+func (x *PatchRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_rockskv_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PatchRequest.ProtoReflect.Descriptor instead.
+func (*PatchRequest) Descriptor() ([]byte, []int) {
+	return file_rockskv_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *PatchRequest) GetKey() []byte {
+	if x != nil {
+		return x.Key
+	}
+	return nil
+}
+
+func (x *PatchRequest) GetOperations() []*PatchOperation {
+	if x != nil {
+		return x.Operations
+	}
+	return nil
+}
+
+type PatchResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	NewValue      []byte                 `protobuf:"bytes,2,opt,name=new_value,json=newValue,proto3" json:"new_value,omitempty"` // Optional: return the updated value
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PatchResponse) Reset() {
+	*x = PatchResponse{}
+	mi := &file_rockskv_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PatchResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PatchResponse) ProtoMessage() {}
+
+func (x *PatchResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_rockskv_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PatchResponse.ProtoReflect.Descriptor instead.
+func (*PatchResponse) Descriptor() ([]byte, []int) {
+	return file_rockskv_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *PatchResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *PatchResponse) GetNewValue() []byte {
+	if x != nil {
+		return x.NewValue
+	}
+	return nil
+}
+
 type KeyValue struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Key           []byte                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
@@ -682,7 +950,7 @@ type KeyValue struct {
 
 func (x *KeyValue) Reset() {
 	*x = KeyValue{}
-	mi := &file_rockskv_proto_msgTypes[6]
+	mi := &file_rockskv_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -694,7 +962,7 @@ func (x *KeyValue) String() string {
 func (*KeyValue) ProtoMessage() {}
 
 func (x *KeyValue) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[6]
+	mi := &file_rockskv_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -707,7 +975,7 @@ func (x *KeyValue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeyValue.ProtoReflect.Descriptor instead.
 func (*KeyValue) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{6}
+	return file_rockskv_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *KeyValue) GetKey() []byte {
@@ -740,7 +1008,7 @@ type BatchGetRequest struct {
 
 func (x *BatchGetRequest) Reset() {
 	*x = BatchGetRequest{}
-	mi := &file_rockskv_proto_msgTypes[7]
+	mi := &file_rockskv_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -752,7 +1020,7 @@ func (x *BatchGetRequest) String() string {
 func (*BatchGetRequest) ProtoMessage() {}
 
 func (x *BatchGetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[7]
+	mi := &file_rockskv_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -765,7 +1033,7 @@ func (x *BatchGetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchGetRequest.ProtoReflect.Descriptor instead.
 func (*BatchGetRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{7}
+	return file_rockskv_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *BatchGetRequest) GetKeys() [][]byte {
@@ -784,7 +1052,7 @@ type BatchGetResponse struct {
 
 func (x *BatchGetResponse) Reset() {
 	*x = BatchGetResponse{}
-	mi := &file_rockskv_proto_msgTypes[8]
+	mi := &file_rockskv_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -796,7 +1064,7 @@ func (x *BatchGetResponse) String() string {
 func (*BatchGetResponse) ProtoMessage() {}
 
 func (x *BatchGetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[8]
+	mi := &file_rockskv_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -809,7 +1077,7 @@ func (x *BatchGetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchGetResponse.ProtoReflect.Descriptor instead.
 func (*BatchGetResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{8}
+	return file_rockskv_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *BatchGetResponse) GetItems() []*KeyValue {
@@ -828,7 +1096,7 @@ type BatchPutRequest struct {
 
 func (x *BatchPutRequest) Reset() {
 	*x = BatchPutRequest{}
-	mi := &file_rockskv_proto_msgTypes[9]
+	mi := &file_rockskv_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -840,7 +1108,7 @@ func (x *BatchPutRequest) String() string {
 func (*BatchPutRequest) ProtoMessage() {}
 
 func (x *BatchPutRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[9]
+	mi := &file_rockskv_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -853,7 +1121,7 @@ func (x *BatchPutRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchPutRequest.ProtoReflect.Descriptor instead.
 func (*BatchPutRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{9}
+	return file_rockskv_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *BatchPutRequest) GetItems() []*KeyValue {
@@ -873,7 +1141,7 @@ type BatchPutResponse struct {
 
 func (x *BatchPutResponse) Reset() {
 	*x = BatchPutResponse{}
-	mi := &file_rockskv_proto_msgTypes[10]
+	mi := &file_rockskv_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -885,7 +1153,7 @@ func (x *BatchPutResponse) String() string {
 func (*BatchPutResponse) ProtoMessage() {}
 
 func (x *BatchPutResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[10]
+	mi := &file_rockskv_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -898,7 +1166,7 @@ func (x *BatchPutResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchPutResponse.ProtoReflect.Descriptor instead.
 func (*BatchPutResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{10}
+	return file_rockskv_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *BatchPutResponse) GetSuccess() bool {
@@ -925,7 +1193,7 @@ type StorageGetRequest struct {
 
 func (x *StorageGetRequest) Reset() {
 	*x = StorageGetRequest{}
-	mi := &file_rockskv_proto_msgTypes[11]
+	mi := &file_rockskv_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -937,7 +1205,7 @@ func (x *StorageGetRequest) String() string {
 func (*StorageGetRequest) ProtoMessage() {}
 
 func (x *StorageGetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[11]
+	mi := &file_rockskv_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -950,7 +1218,7 @@ func (x *StorageGetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StorageGetRequest.ProtoReflect.Descriptor instead.
 func (*StorageGetRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{11}
+	return file_rockskv_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *StorageGetRequest) GetKey() []byte {
@@ -978,7 +1246,7 @@ type StorageGetResponse struct {
 
 func (x *StorageGetResponse) Reset() {
 	*x = StorageGetResponse{}
-	mi := &file_rockskv_proto_msgTypes[12]
+	mi := &file_rockskv_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -990,7 +1258,7 @@ func (x *StorageGetResponse) String() string {
 func (*StorageGetResponse) ProtoMessage() {}
 
 func (x *StorageGetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[12]
+	mi := &file_rockskv_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1003,7 +1271,7 @@ func (x *StorageGetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StorageGetResponse.ProtoReflect.Descriptor instead.
 func (*StorageGetResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{12}
+	return file_rockskv_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *StorageGetResponse) GetValue() []byte {
@@ -1038,7 +1306,7 @@ type StoragePutRequest struct {
 
 func (x *StoragePutRequest) Reset() {
 	*x = StoragePutRequest{}
-	mi := &file_rockskv_proto_msgTypes[13]
+	mi := &file_rockskv_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1050,7 +1318,7 @@ func (x *StoragePutRequest) String() string {
 func (*StoragePutRequest) ProtoMessage() {}
 
 func (x *StoragePutRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[13]
+	mi := &file_rockskv_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1063,7 +1331,7 @@ func (x *StoragePutRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StoragePutRequest.ProtoReflect.Descriptor instead.
 func (*StoragePutRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{13}
+	return file_rockskv_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *StoragePutRequest) GetKey() []byte {
@@ -1097,7 +1365,7 @@ type StoragePutResponse struct {
 
 func (x *StoragePutResponse) Reset() {
 	*x = StoragePutResponse{}
-	mi := &file_rockskv_proto_msgTypes[14]
+	mi := &file_rockskv_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1109,7 +1377,7 @@ func (x *StoragePutResponse) String() string {
 func (*StoragePutResponse) ProtoMessage() {}
 
 func (x *StoragePutResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[14]
+	mi := &file_rockskv_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1122,7 +1390,7 @@ func (x *StoragePutResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StoragePutResponse.ProtoReflect.Descriptor instead.
 func (*StoragePutResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{14}
+	return file_rockskv_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *StoragePutResponse) GetSuccess() bool {
@@ -1149,7 +1417,7 @@ type StorageDeleteRequest struct {
 
 func (x *StorageDeleteRequest) Reset() {
 	*x = StorageDeleteRequest{}
-	mi := &file_rockskv_proto_msgTypes[15]
+	mi := &file_rockskv_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1161,7 +1429,7 @@ func (x *StorageDeleteRequest) String() string {
 func (*StorageDeleteRequest) ProtoMessage() {}
 
 func (x *StorageDeleteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[15]
+	mi := &file_rockskv_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1174,7 +1442,7 @@ func (x *StorageDeleteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StorageDeleteRequest.ProtoReflect.Descriptor instead.
 func (*StorageDeleteRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{15}
+	return file_rockskv_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *StorageDeleteRequest) GetKey() []byte {
@@ -1201,7 +1469,7 @@ type StorageDeleteResponse struct {
 
 func (x *StorageDeleteResponse) Reset() {
 	*x = StorageDeleteResponse{}
-	mi := &file_rockskv_proto_msgTypes[16]
+	mi := &file_rockskv_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1213,7 +1481,7 @@ func (x *StorageDeleteResponse) String() string {
 func (*StorageDeleteResponse) ProtoMessage() {}
 
 func (x *StorageDeleteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[16]
+	mi := &file_rockskv_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1226,7 +1494,7 @@ func (x *StorageDeleteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StorageDeleteResponse.ProtoReflect.Descriptor instead.
 func (*StorageDeleteResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{16}
+	return file_rockskv_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *StorageDeleteResponse) GetSuccess() bool {
@@ -1243,6 +1511,127 @@ func (x *StorageDeleteResponse) GetError() ErrorCode {
 	return ErrorCode_OK
 }
 
+// StoragePatchRequest for sparse update at storage level
+type StoragePatchRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           []byte                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	PatchData     []byte                 `protobuf:"bytes,2,opt,name=patch_data,json=patchData,proto3" json:"patch_data,omitempty"` // Encoded patch operations
+	PartitionId   uint32                 `protobuf:"varint,3,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StoragePatchRequest) Reset() {
+	*x = StoragePatchRequest{}
+	mi := &file_rockskv_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StoragePatchRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StoragePatchRequest) ProtoMessage() {}
+
+func (x *StoragePatchRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_rockskv_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StoragePatchRequest.ProtoReflect.Descriptor instead.
+func (*StoragePatchRequest) Descriptor() ([]byte, []int) {
+	return file_rockskv_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *StoragePatchRequest) GetKey() []byte {
+	if x != nil {
+		return x.Key
+	}
+	return nil
+}
+
+func (x *StoragePatchRequest) GetPatchData() []byte {
+	if x != nil {
+		return x.PatchData
+	}
+	return nil
+}
+
+func (x *StoragePatchRequest) GetPartitionId() uint32 {
+	if x != nil {
+		return x.PartitionId
+	}
+	return 0
+}
+
+type StoragePatchResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	NewValue      []byte                 `protobuf:"bytes,2,opt,name=new_value,json=newValue,proto3" json:"new_value,omitempty"` // Updated value after patch
+	Error         ErrorCode              `protobuf:"varint,3,opt,name=error,proto3,enum=rockskv.ErrorCode" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StoragePatchResponse) Reset() {
+	*x = StoragePatchResponse{}
+	mi := &file_rockskv_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StoragePatchResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StoragePatchResponse) ProtoMessage() {}
+
+func (x *StoragePatchResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_rockskv_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StoragePatchResponse.ProtoReflect.Descriptor instead.
+func (*StoragePatchResponse) Descriptor() ([]byte, []int) {
+	return file_rockskv_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *StoragePatchResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *StoragePatchResponse) GetNewValue() []byte {
+	if x != nil {
+		return x.NewValue
+	}
+	return nil
+}
+
+func (x *StoragePatchResponse) GetError() ErrorCode {
+	if x != nil {
+		return x.Error
+	}
+	return ErrorCode_OK
+}
+
 type StorageBatchPutRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Items         []*KeyValue            `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
@@ -1253,7 +1642,7 @@ type StorageBatchPutRequest struct {
 
 func (x *StorageBatchPutRequest) Reset() {
 	*x = StorageBatchPutRequest{}
-	mi := &file_rockskv_proto_msgTypes[17]
+	mi := &file_rockskv_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1265,7 +1654,7 @@ func (x *StorageBatchPutRequest) String() string {
 func (*StorageBatchPutRequest) ProtoMessage() {}
 
 func (x *StorageBatchPutRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[17]
+	mi := &file_rockskv_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1278,7 +1667,7 @@ func (x *StorageBatchPutRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StorageBatchPutRequest.ProtoReflect.Descriptor instead.
 func (*StorageBatchPutRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{17}
+	return file_rockskv_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *StorageBatchPutRequest) GetItems() []*KeyValue {
@@ -1306,7 +1695,7 @@ type StorageBatchPutResponse struct {
 
 func (x *StorageBatchPutResponse) Reset() {
 	*x = StorageBatchPutResponse{}
-	mi := &file_rockskv_proto_msgTypes[18]
+	mi := &file_rockskv_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1318,7 +1707,7 @@ func (x *StorageBatchPutResponse) String() string {
 func (*StorageBatchPutResponse) ProtoMessage() {}
 
 func (x *StorageBatchPutResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[18]
+	mi := &file_rockskv_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1331,7 +1720,7 @@ func (x *StorageBatchPutResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StorageBatchPutResponse.ProtoReflect.Descriptor instead.
 func (*StorageBatchPutResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{18}
+	return file_rockskv_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *StorageBatchPutResponse) GetSuccess() bool {
@@ -1365,7 +1754,7 @@ type ExportSSTRequest struct {
 
 func (x *ExportSSTRequest) Reset() {
 	*x = ExportSSTRequest{}
-	mi := &file_rockskv_proto_msgTypes[19]
+	mi := &file_rockskv_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1377,7 +1766,7 @@ func (x *ExportSSTRequest) String() string {
 func (*ExportSSTRequest) ProtoMessage() {}
 
 func (x *ExportSSTRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[19]
+	mi := &file_rockskv_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1390,7 +1779,7 @@ func (x *ExportSSTRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportSSTRequest.ProtoReflect.Descriptor instead.
 func (*ExportSSTRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{19}
+	return file_rockskv_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ExportSSTRequest) GetPartitionId() uint32 {
@@ -1421,7 +1810,7 @@ type SSTChunk struct {
 
 func (x *SSTChunk) Reset() {
 	*x = SSTChunk{}
-	mi := &file_rockskv_proto_msgTypes[20]
+	mi := &file_rockskv_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1433,7 +1822,7 @@ func (x *SSTChunk) String() string {
 func (*SSTChunk) ProtoMessage() {}
 
 func (x *SSTChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[20]
+	mi := &file_rockskv_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1446,7 +1835,7 @@ func (x *SSTChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SSTChunk.ProtoReflect.Descriptor instead.
 func (*SSTChunk) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{20}
+	return file_rockskv_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *SSTChunk) GetData() []byte {
@@ -1502,7 +1891,7 @@ type IngestSSTResponse struct {
 
 func (x *IngestSSTResponse) Reset() {
 	*x = IngestSSTResponse{}
-	mi := &file_rockskv_proto_msgTypes[21]
+	mi := &file_rockskv_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1514,7 +1903,7 @@ func (x *IngestSSTResponse) String() string {
 func (*IngestSSTResponse) ProtoMessage() {}
 
 func (x *IngestSSTResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[21]
+	mi := &file_rockskv_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1527,7 +1916,7 @@ func (x *IngestSSTResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IngestSSTResponse.ProtoReflect.Descriptor instead.
 func (*IngestSSTResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{21}
+	return file_rockskv_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *IngestSSTResponse) GetSuccess() bool {
@@ -1562,7 +1951,7 @@ type RegisterNodeRequest struct {
 
 func (x *RegisterNodeRequest) Reset() {
 	*x = RegisterNodeRequest{}
-	mi := &file_rockskv_proto_msgTypes[22]
+	mi := &file_rockskv_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1574,7 +1963,7 @@ func (x *RegisterNodeRequest) String() string {
 func (*RegisterNodeRequest) ProtoMessage() {}
 
 func (x *RegisterNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[22]
+	mi := &file_rockskv_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1587,7 +1976,7 @@ func (x *RegisterNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterNodeRequest.ProtoReflect.Descriptor instead.
 func (*RegisterNodeRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{22}
+	return file_rockskv_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *RegisterNodeRequest) GetNodeId() string {
@@ -1620,7 +2009,7 @@ type RegisterNodeResponse struct {
 
 func (x *RegisterNodeResponse) Reset() {
 	*x = RegisterNodeResponse{}
-	mi := &file_rockskv_proto_msgTypes[23]
+	mi := &file_rockskv_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1632,7 +2021,7 @@ func (x *RegisterNodeResponse) String() string {
 func (*RegisterNodeResponse) ProtoMessage() {}
 
 func (x *RegisterNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[23]
+	mi := &file_rockskv_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1645,7 +2034,7 @@ func (x *RegisterNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterNodeResponse.ProtoReflect.Descriptor instead.
 func (*RegisterNodeResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{23}
+	return file_rockskv_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *RegisterNodeResponse) GetSuccess() bool {
@@ -1664,7 +2053,7 @@ type HeartbeatRequest struct {
 
 func (x *HeartbeatRequest) Reset() {
 	*x = HeartbeatRequest{}
-	mi := &file_rockskv_proto_msgTypes[24]
+	mi := &file_rockskv_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1676,7 +2065,7 @@ func (x *HeartbeatRequest) String() string {
 func (*HeartbeatRequest) ProtoMessage() {}
 
 func (x *HeartbeatRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[24]
+	mi := &file_rockskv_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1689,7 +2078,7 @@ func (x *HeartbeatRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatRequest.ProtoReflect.Descriptor instead.
 func (*HeartbeatRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{24}
+	return file_rockskv_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *HeartbeatRequest) GetNodeId() string {
@@ -1709,7 +2098,7 @@ type HeartbeatResponse struct {
 
 func (x *HeartbeatResponse) Reset() {
 	*x = HeartbeatResponse{}
-	mi := &file_rockskv_proto_msgTypes[25]
+	mi := &file_rockskv_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1721,7 +2110,7 @@ func (x *HeartbeatResponse) String() string {
 func (*HeartbeatResponse) ProtoMessage() {}
 
 func (x *HeartbeatResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[25]
+	mi := &file_rockskv_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1734,7 +2123,7 @@ func (x *HeartbeatResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatResponse.ProtoReflect.Descriptor instead.
 func (*HeartbeatResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{25}
+	return file_rockskv_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *HeartbeatResponse) GetSuccess() bool {
@@ -1760,7 +2149,7 @@ type GetRouteTableRequest struct {
 
 func (x *GetRouteTableRequest) Reset() {
 	*x = GetRouteTableRequest{}
-	mi := &file_rockskv_proto_msgTypes[26]
+	mi := &file_rockskv_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1772,7 +2161,7 @@ func (x *GetRouteTableRequest) String() string {
 func (*GetRouteTableRequest) ProtoMessage() {}
 
 func (x *GetRouteTableRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[26]
+	mi := &file_rockskv_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1785,7 +2174,7 @@ func (x *GetRouteTableRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRouteTableRequest.ProtoReflect.Descriptor instead.
 func (*GetRouteTableRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{26}
+	return file_rockskv_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *GetRouteTableRequest) GetVersion() uint64 {
@@ -1804,7 +2193,7 @@ type GetRouteTableResponse struct {
 
 func (x *GetRouteTableResponse) Reset() {
 	*x = GetRouteTableResponse{}
-	mi := &file_rockskv_proto_msgTypes[27]
+	mi := &file_rockskv_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1816,7 +2205,7 @@ func (x *GetRouteTableResponse) String() string {
 func (*GetRouteTableResponse) ProtoMessage() {}
 
 func (x *GetRouteTableResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[27]
+	mi := &file_rockskv_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1829,7 +2218,7 @@ func (x *GetRouteTableResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRouteTableResponse.ProtoReflect.Descriptor instead.
 func (*GetRouteTableResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{27}
+	return file_rockskv_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *GetRouteTableResponse) GetRouteTable() *RouteTable {
@@ -1848,7 +2237,7 @@ type SubscribeRequest struct {
 
 func (x *SubscribeRequest) Reset() {
 	*x = SubscribeRequest{}
-	mi := &file_rockskv_proto_msgTypes[28]
+	mi := &file_rockskv_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1860,7 +2249,7 @@ func (x *SubscribeRequest) String() string {
 func (*SubscribeRequest) ProtoMessage() {}
 
 func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[28]
+	mi := &file_rockskv_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1873,7 +2262,7 @@ func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
 func (*SubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{28}
+	return file_rockskv_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *SubscribeRequest) GetNodeId() string {
@@ -1893,7 +2282,7 @@ type RouteUpdate struct {
 
 func (x *RouteUpdate) Reset() {
 	*x = RouteUpdate{}
-	mi := &file_rockskv_proto_msgTypes[29]
+	mi := &file_rockskv_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1905,7 +2294,7 @@ func (x *RouteUpdate) String() string {
 func (*RouteUpdate) ProtoMessage() {}
 
 func (x *RouteUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[29]
+	mi := &file_rockskv_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1918,7 +2307,7 @@ func (x *RouteUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RouteUpdate.ProtoReflect.Descriptor instead.
 func (*RouteUpdate) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{29}
+	return file_rockskv_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *RouteUpdate) GetVersion() uint64 {
@@ -1945,7 +2334,7 @@ type RouteTable struct {
 
 func (x *RouteTable) Reset() {
 	*x = RouteTable{}
-	mi := &file_rockskv_proto_msgTypes[30]
+	mi := &file_rockskv_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1957,7 +2346,7 @@ func (x *RouteTable) String() string {
 func (*RouteTable) ProtoMessage() {}
 
 func (x *RouteTable) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[30]
+	mi := &file_rockskv_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1970,7 +2359,7 @@ func (x *RouteTable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RouteTable.ProtoReflect.Descriptor instead.
 func (*RouteTable) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{30}
+	return file_rockskv_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *RouteTable) GetPartitions() []*PartitionInfo {
@@ -2002,7 +2391,7 @@ type PartitionInfo struct {
 
 func (x *PartitionInfo) Reset() {
 	*x = PartitionInfo{}
-	mi := &file_rockskv_proto_msgTypes[31]
+	mi := &file_rockskv_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2014,7 +2403,7 @@ func (x *PartitionInfo) String() string {
 func (*PartitionInfo) ProtoMessage() {}
 
 func (x *PartitionInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[31]
+	mi := &file_rockskv_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2027,7 +2416,7 @@ func (x *PartitionInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartitionInfo.ProtoReflect.Descriptor instead.
 func (*PartitionInfo) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{31}
+	return file_rockskv_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *PartitionInfo) GetPartitionId() uint32 {
@@ -2083,7 +2472,7 @@ type TriggerRebalanceRequest struct {
 
 func (x *TriggerRebalanceRequest) Reset() {
 	*x = TriggerRebalanceRequest{}
-	mi := &file_rockskv_proto_msgTypes[32]
+	mi := &file_rockskv_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2095,7 +2484,7 @@ func (x *TriggerRebalanceRequest) String() string {
 func (*TriggerRebalanceRequest) ProtoMessage() {}
 
 func (x *TriggerRebalanceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[32]
+	mi := &file_rockskv_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2108,7 +2497,7 @@ func (x *TriggerRebalanceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriggerRebalanceRequest.ProtoReflect.Descriptor instead.
 func (*TriggerRebalanceRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{32}
+	return file_rockskv_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *TriggerRebalanceRequest) GetForce() bool {
@@ -2144,7 +2533,7 @@ type TriggerRebalanceResponse struct {
 
 func (x *TriggerRebalanceResponse) Reset() {
 	*x = TriggerRebalanceResponse{}
-	mi := &file_rockskv_proto_msgTypes[33]
+	mi := &file_rockskv_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2156,7 +2545,7 @@ func (x *TriggerRebalanceResponse) String() string {
 func (*TriggerRebalanceResponse) ProtoMessage() {}
 
 func (x *TriggerRebalanceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[33]
+	mi := &file_rockskv_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2169,7 +2558,7 @@ func (x *TriggerRebalanceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriggerRebalanceResponse.ProtoReflect.Descriptor instead.
 func (*TriggerRebalanceResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{33}
+	return file_rockskv_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *TriggerRebalanceResponse) GetSuccess() bool {
@@ -2209,7 +2598,7 @@ type GetMigrationStatusRequest struct {
 
 func (x *GetMigrationStatusRequest) Reset() {
 	*x = GetMigrationStatusRequest{}
-	mi := &file_rockskv_proto_msgTypes[34]
+	mi := &file_rockskv_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2221,7 +2610,7 @@ func (x *GetMigrationStatusRequest) String() string {
 func (*GetMigrationStatusRequest) ProtoMessage() {}
 
 func (x *GetMigrationStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[34]
+	mi := &file_rockskv_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2234,7 +2623,7 @@ func (x *GetMigrationStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMigrationStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetMigrationStatusRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{34}
+	return file_rockskv_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *GetMigrationStatusRequest) GetMigrationId() string {
@@ -2263,7 +2652,7 @@ type GetMigrationStatusResponse struct {
 
 func (x *GetMigrationStatusResponse) Reset() {
 	*x = GetMigrationStatusResponse{}
-	mi := &file_rockskv_proto_msgTypes[35]
+	mi := &file_rockskv_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2275,7 +2664,7 @@ func (x *GetMigrationStatusResponse) String() string {
 func (*GetMigrationStatusResponse) ProtoMessage() {}
 
 func (x *GetMigrationStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[35]
+	mi := &file_rockskv_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2288,7 +2677,7 @@ func (x *GetMigrationStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMigrationStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetMigrationStatusResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{35}
+	return file_rockskv_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *GetMigrationStatusResponse) GetInProgress() bool {
@@ -2384,7 +2773,7 @@ type PartitionMigrationStatus struct {
 
 func (x *PartitionMigrationStatus) Reset() {
 	*x = PartitionMigrationStatus{}
-	mi := &file_rockskv_proto_msgTypes[36]
+	mi := &file_rockskv_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2396,7 +2785,7 @@ func (x *PartitionMigrationStatus) String() string {
 func (*PartitionMigrationStatus) ProtoMessage() {}
 
 func (x *PartitionMigrationStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[36]
+	mi := &file_rockskv_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2409,7 +2798,7 @@ func (x *PartitionMigrationStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartitionMigrationStatus.ProtoReflect.Descriptor instead.
 func (*PartitionMigrationStatus) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{36}
+	return file_rockskv_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *PartitionMigrationStatus) GetPartitionId() uint32 {
@@ -2477,7 +2866,7 @@ type CancelMigrationRequest struct {
 
 func (x *CancelMigrationRequest) Reset() {
 	*x = CancelMigrationRequest{}
-	mi := &file_rockskv_proto_msgTypes[37]
+	mi := &file_rockskv_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2489,7 +2878,7 @@ func (x *CancelMigrationRequest) String() string {
 func (*CancelMigrationRequest) ProtoMessage() {}
 
 func (x *CancelMigrationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[37]
+	mi := &file_rockskv_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2502,7 +2891,7 @@ func (x *CancelMigrationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelMigrationRequest.ProtoReflect.Descriptor instead.
 func (*CancelMigrationRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{37}
+	return file_rockskv_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *CancelMigrationRequest) GetMigrationId() string {
@@ -2522,7 +2911,7 @@ type CancelMigrationResponse struct {
 
 func (x *CancelMigrationResponse) Reset() {
 	*x = CancelMigrationResponse{}
-	mi := &file_rockskv_proto_msgTypes[38]
+	mi := &file_rockskv_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2534,7 +2923,7 @@ func (x *CancelMigrationResponse) String() string {
 func (*CancelMigrationResponse) ProtoMessage() {}
 
 func (x *CancelMigrationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[38]
+	mi := &file_rockskv_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2547,7 +2936,7 @@ func (x *CancelMigrationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelMigrationResponse.ProtoReflect.Descriptor instead.
 func (*CancelMigrationResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{38}
+	return file_rockskv_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *CancelMigrationResponse) GetSuccess() bool {
@@ -2572,7 +2961,7 @@ type GetClusterInfoRequest struct {
 
 func (x *GetClusterInfoRequest) Reset() {
 	*x = GetClusterInfoRequest{}
-	mi := &file_rockskv_proto_msgTypes[39]
+	mi := &file_rockskv_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2584,7 +2973,7 @@ func (x *GetClusterInfoRequest) String() string {
 func (*GetClusterInfoRequest) ProtoMessage() {}
 
 func (x *GetClusterInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[39]
+	mi := &file_rockskv_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2597,7 +2986,7 @@ func (x *GetClusterInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClusterInfoRequest.ProtoReflect.Descriptor instead.
 func (*GetClusterInfoRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{39}
+	return file_rockskv_proto_rawDescGZIP(), []int{44}
 }
 
 type GetClusterInfoResponse struct {
@@ -2612,7 +3001,7 @@ type GetClusterInfoResponse struct {
 
 func (x *GetClusterInfoResponse) Reset() {
 	*x = GetClusterInfoResponse{}
-	mi := &file_rockskv_proto_msgTypes[40]
+	mi := &file_rockskv_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2624,7 +3013,7 @@ func (x *GetClusterInfoResponse) String() string {
 func (*GetClusterInfoResponse) ProtoMessage() {}
 
 func (x *GetClusterInfoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[40]
+	mi := &file_rockskv_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2637,7 +3026,7 @@ func (x *GetClusterInfoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClusterInfoResponse.ProtoReflect.Descriptor instead.
 func (*GetClusterInfoResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{40}
+	return file_rockskv_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *GetClusterInfoResponse) GetState() ClusterState {
@@ -2676,7 +3065,7 @@ type InitClusterRequest struct {
 
 func (x *InitClusterRequest) Reset() {
 	*x = InitClusterRequest{}
-	mi := &file_rockskv_proto_msgTypes[41]
+	mi := &file_rockskv_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2688,7 +3077,7 @@ func (x *InitClusterRequest) String() string {
 func (*InitClusterRequest) ProtoMessage() {}
 
 func (x *InitClusterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[41]
+	mi := &file_rockskv_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2701,7 +3090,7 @@ func (x *InitClusterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InitClusterRequest.ProtoReflect.Descriptor instead.
 func (*InitClusterRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{41}
+	return file_rockskv_proto_rawDescGZIP(), []int{46}
 }
 
 type InitClusterResponse struct {
@@ -2716,7 +3105,7 @@ type InitClusterResponse struct {
 
 func (x *InitClusterResponse) Reset() {
 	*x = InitClusterResponse{}
-	mi := &file_rockskv_proto_msgTypes[42]
+	mi := &file_rockskv_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2728,7 +3117,7 @@ func (x *InitClusterResponse) String() string {
 func (*InitClusterResponse) ProtoMessage() {}
 
 func (x *InitClusterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[42]
+	mi := &file_rockskv_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2741,7 +3130,7 @@ func (x *InitClusterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InitClusterResponse.ProtoReflect.Descriptor instead.
 func (*InitClusterResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{42}
+	return file_rockskv_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *InitClusterResponse) GetSuccess() bool {
@@ -2782,7 +3171,7 @@ type AcquireLeaseRequest struct {
 
 func (x *AcquireLeaseRequest) Reset() {
 	*x = AcquireLeaseRequest{}
-	mi := &file_rockskv_proto_msgTypes[43]
+	mi := &file_rockskv_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2794,7 +3183,7 @@ func (x *AcquireLeaseRequest) String() string {
 func (*AcquireLeaseRequest) ProtoMessage() {}
 
 func (x *AcquireLeaseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[43]
+	mi := &file_rockskv_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2807,7 +3196,7 @@ func (x *AcquireLeaseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcquireLeaseRequest.ProtoReflect.Descriptor instead.
 func (*AcquireLeaseRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{43}
+	return file_rockskv_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *AcquireLeaseRequest) GetPartitionId() uint32 {
@@ -2835,7 +3224,7 @@ type AcquireLeaseResponse struct {
 
 func (x *AcquireLeaseResponse) Reset() {
 	*x = AcquireLeaseResponse{}
-	mi := &file_rockskv_proto_msgTypes[44]
+	mi := &file_rockskv_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2847,7 +3236,7 @@ func (x *AcquireLeaseResponse) String() string {
 func (*AcquireLeaseResponse) ProtoMessage() {}
 
 func (x *AcquireLeaseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[44]
+	mi := &file_rockskv_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2860,7 +3249,7 @@ func (x *AcquireLeaseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcquireLeaseResponse.ProtoReflect.Descriptor instead.
 func (*AcquireLeaseResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{44}
+	return file_rockskv_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *AcquireLeaseResponse) GetSuccess() bool {
@@ -2893,7 +3282,7 @@ type RenewLeaseRequest struct {
 
 func (x *RenewLeaseRequest) Reset() {
 	*x = RenewLeaseRequest{}
-	mi := &file_rockskv_proto_msgTypes[45]
+	mi := &file_rockskv_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2905,7 +3294,7 @@ func (x *RenewLeaseRequest) String() string {
 func (*RenewLeaseRequest) ProtoMessage() {}
 
 func (x *RenewLeaseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[45]
+	mi := &file_rockskv_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2918,7 +3307,7 @@ func (x *RenewLeaseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenewLeaseRequest.ProtoReflect.Descriptor instead.
 func (*RenewLeaseRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{45}
+	return file_rockskv_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *RenewLeaseRequest) GetLeaseId() int64 {
@@ -2938,7 +3327,7 @@ type RenewLeaseResponse struct {
 
 func (x *RenewLeaseResponse) Reset() {
 	*x = RenewLeaseResponse{}
-	mi := &file_rockskv_proto_msgTypes[46]
+	mi := &file_rockskv_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2950,7 +3339,7 @@ func (x *RenewLeaseResponse) String() string {
 func (*RenewLeaseResponse) ProtoMessage() {}
 
 func (x *RenewLeaseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[46]
+	mi := &file_rockskv_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2963,7 +3352,7 @@ func (x *RenewLeaseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenewLeaseResponse.ProtoReflect.Descriptor instead.
 func (*RenewLeaseResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{46}
+	return file_rockskv_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *RenewLeaseResponse) GetSuccess() bool {
@@ -2989,7 +3378,7 @@ type RevokeLeaseRequest struct {
 
 func (x *RevokeLeaseRequest) Reset() {
 	*x = RevokeLeaseRequest{}
-	mi := &file_rockskv_proto_msgTypes[47]
+	mi := &file_rockskv_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3001,7 +3390,7 @@ func (x *RevokeLeaseRequest) String() string {
 func (*RevokeLeaseRequest) ProtoMessage() {}
 
 func (x *RevokeLeaseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[47]
+	mi := &file_rockskv_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3014,7 +3403,7 @@ func (x *RevokeLeaseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeLeaseRequest.ProtoReflect.Descriptor instead.
 func (*RevokeLeaseRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{47}
+	return file_rockskv_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *RevokeLeaseRequest) GetLeaseId() int64 {
@@ -3033,7 +3422,7 @@ type RevokeLeaseResponse struct {
 
 func (x *RevokeLeaseResponse) Reset() {
 	*x = RevokeLeaseResponse{}
-	mi := &file_rockskv_proto_msgTypes[48]
+	mi := &file_rockskv_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3045,7 +3434,7 @@ func (x *RevokeLeaseResponse) String() string {
 func (*RevokeLeaseResponse) ProtoMessage() {}
 
 func (x *RevokeLeaseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[48]
+	mi := &file_rockskv_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3058,7 +3447,7 @@ func (x *RevokeLeaseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeLeaseResponse.ProtoReflect.Descriptor instead.
 func (*RevokeLeaseResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{48}
+	return file_rockskv_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *RevokeLeaseResponse) GetSuccess() bool {
@@ -3080,7 +3469,7 @@ type ReplicateRequest struct {
 
 func (x *ReplicateRequest) Reset() {
 	*x = ReplicateRequest{}
-	mi := &file_rockskv_proto_msgTypes[49]
+	mi := &file_rockskv_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3092,7 +3481,7 @@ func (x *ReplicateRequest) String() string {
 func (*ReplicateRequest) ProtoMessage() {}
 
 func (x *ReplicateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[49]
+	mi := &file_rockskv_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3105,7 +3494,7 @@ func (x *ReplicateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplicateRequest.ProtoReflect.Descriptor instead.
 func (*ReplicateRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{49}
+	return file_rockskv_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *ReplicateRequest) GetPartitionId() uint32 {
@@ -3134,16 +3523,17 @@ type ReplicationEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Offset        int64                  `protobuf:"varint,1,opt,name=offset,proto3" json:"offset,omitempty"` // Unique offset for this entry
 	Key           []byte                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
-	Value         []byte                 `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"` // Empty for delete operations
-	IsDelete      bool                   `protobuf:"varint,4,opt,name=is_delete,json=isDelete,proto3" json:"is_delete,omitempty"`
-	Timestamp     int64                  `protobuf:"varint,5,opt,name=timestamp,proto3" json:"timestamp,omitempty"` // Write timestamp in nanoseconds
+	Value         []byte                 `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"`                                                 // Value for PUT, patch data for PATCH, empty for DELETE
+	IsDelete      bool                   `protobuf:"varint,4,opt,name=is_delete,json=isDelete,proto3" json:"is_delete,omitempty"`                          // Deprecated: use op_type instead
+	Timestamp     int64                  `protobuf:"varint,5,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                        // Write timestamp in nanoseconds
+	OpType        ReplicationOpType      `protobuf:"varint,6,opt,name=op_type,json=opType,proto3,enum=rockskv.ReplicationOpType" json:"op_type,omitempty"` // Operation type (PUT, DELETE, PATCH)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ReplicationEntry) Reset() {
 	*x = ReplicationEntry{}
-	mi := &file_rockskv_proto_msgTypes[50]
+	mi := &file_rockskv_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3155,7 +3545,7 @@ func (x *ReplicationEntry) String() string {
 func (*ReplicationEntry) ProtoMessage() {}
 
 func (x *ReplicationEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[50]
+	mi := &file_rockskv_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3168,7 +3558,7 @@ func (x *ReplicationEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplicationEntry.ProtoReflect.Descriptor instead.
 func (*ReplicationEntry) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{50}
+	return file_rockskv_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *ReplicationEntry) GetOffset() int64 {
@@ -3206,6 +3596,13 @@ func (x *ReplicationEntry) GetTimestamp() int64 {
 	return 0
 }
 
+func (x *ReplicationEntry) GetOpType() ReplicationOpType {
+	if x != nil {
+		return x.OpType
+	}
+	return ReplicationOpType_REP_OP_PUT
+}
+
 type ReplicateResponse struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Success           bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
@@ -3217,7 +3614,7 @@ type ReplicateResponse struct {
 
 func (x *ReplicateResponse) Reset() {
 	*x = ReplicateResponse{}
-	mi := &file_rockskv_proto_msgTypes[51]
+	mi := &file_rockskv_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3229,7 +3626,7 @@ func (x *ReplicateResponse) String() string {
 func (*ReplicateResponse) ProtoMessage() {}
 
 func (x *ReplicateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[51]
+	mi := &file_rockskv_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3242,7 +3639,7 @@ func (x *ReplicateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplicateResponse.ProtoReflect.Descriptor instead.
 func (*ReplicateResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{51}
+	return file_rockskv_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *ReplicateResponse) GetSuccess() bool {
@@ -3275,7 +3672,7 @@ type GetReplicationStatusRequest struct {
 
 func (x *GetReplicationStatusRequest) Reset() {
 	*x = GetReplicationStatusRequest{}
-	mi := &file_rockskv_proto_msgTypes[52]
+	mi := &file_rockskv_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3287,7 +3684,7 @@ func (x *GetReplicationStatusRequest) String() string {
 func (*GetReplicationStatusRequest) ProtoMessage() {}
 
 func (x *GetReplicationStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[52]
+	mi := &file_rockskv_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3300,7 +3697,7 @@ func (x *GetReplicationStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetReplicationStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetReplicationStatusRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{52}
+	return file_rockskv_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *GetReplicationStatusRequest) GetPartitionId() uint32 {
@@ -3324,7 +3721,7 @@ type GetReplicationStatusResponse struct {
 
 func (x *GetReplicationStatusResponse) Reset() {
 	*x = GetReplicationStatusResponse{}
-	mi := &file_rockskv_proto_msgTypes[53]
+	mi := &file_rockskv_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3336,7 +3733,7 @@ func (x *GetReplicationStatusResponse) String() string {
 func (*GetReplicationStatusResponse) ProtoMessage() {}
 
 func (x *GetReplicationStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[53]
+	mi := &file_rockskv_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3349,7 +3746,7 @@ func (x *GetReplicationStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetReplicationStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetReplicationStatusResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{53}
+	return file_rockskv_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *GetReplicationStatusResponse) GetPartitionId() uint32 {
@@ -3405,7 +3802,7 @@ type ShutdownNodeRequest struct {
 
 func (x *ShutdownNodeRequest) Reset() {
 	*x = ShutdownNodeRequest{}
-	mi := &file_rockskv_proto_msgTypes[54]
+	mi := &file_rockskv_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3417,7 +3814,7 @@ func (x *ShutdownNodeRequest) String() string {
 func (*ShutdownNodeRequest) ProtoMessage() {}
 
 func (x *ShutdownNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[54]
+	mi := &file_rockskv_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3430,7 +3827,7 @@ func (x *ShutdownNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownNodeRequest.ProtoReflect.Descriptor instead.
 func (*ShutdownNodeRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{54}
+	return file_rockskv_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *ShutdownNodeRequest) GetNodeId() string {
@@ -3466,7 +3863,7 @@ type ShutdownNodeResponse struct {
 
 func (x *ShutdownNodeResponse) Reset() {
 	*x = ShutdownNodeResponse{}
-	mi := &file_rockskv_proto_msgTypes[55]
+	mi := &file_rockskv_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3478,7 +3875,7 @@ func (x *ShutdownNodeResponse) String() string {
 func (*ShutdownNodeResponse) ProtoMessage() {}
 
 func (x *ShutdownNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[55]
+	mi := &file_rockskv_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3491,7 +3888,7 @@ func (x *ShutdownNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownNodeResponse.ProtoReflect.Descriptor instead.
 func (*ShutdownNodeResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{55}
+	return file_rockskv_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *ShutdownNodeResponse) GetSuccess() bool {
@@ -3531,7 +3928,7 @@ type GetNodeStatusRequest struct {
 
 func (x *GetNodeStatusRequest) Reset() {
 	*x = GetNodeStatusRequest{}
-	mi := &file_rockskv_proto_msgTypes[56]
+	mi := &file_rockskv_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3543,7 +3940,7 @@ func (x *GetNodeStatusRequest) String() string {
 func (*GetNodeStatusRequest) ProtoMessage() {}
 
 func (x *GetNodeStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[56]
+	mi := &file_rockskv_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3556,7 +3953,7 @@ func (x *GetNodeStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNodeStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetNodeStatusRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{56}
+	return file_rockskv_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *GetNodeStatusRequest) GetNodeId() string {
@@ -3582,7 +3979,7 @@ type GetNodeStatusResponse struct {
 
 func (x *GetNodeStatusResponse) Reset() {
 	*x = GetNodeStatusResponse{}
-	mi := &file_rockskv_proto_msgTypes[57]
+	mi := &file_rockskv_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3594,7 +3991,7 @@ func (x *GetNodeStatusResponse) String() string {
 func (*GetNodeStatusResponse) ProtoMessage() {}
 
 func (x *GetNodeStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[57]
+	mi := &file_rockskv_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3607,7 +4004,7 @@ func (x *GetNodeStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNodeStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetNodeStatusResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{57}
+	return file_rockskv_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *GetNodeStatusResponse) GetNodeId() string {
@@ -3678,7 +4075,7 @@ type MigrationConfig struct {
 
 func (x *MigrationConfig) Reset() {
 	*x = MigrationConfig{}
-	mi := &file_rockskv_proto_msgTypes[58]
+	mi := &file_rockskv_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3690,7 +4087,7 @@ func (x *MigrationConfig) String() string {
 func (*MigrationConfig) ProtoMessage() {}
 
 func (x *MigrationConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[58]
+	mi := &file_rockskv_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3703,7 +4100,7 @@ func (x *MigrationConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MigrationConfig.ProtoReflect.Descriptor instead.
 func (*MigrationConfig) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{58}
+	return file_rockskv_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *MigrationConfig) GetBandwidthLimitBytes() int64 {
@@ -3742,7 +4139,7 @@ type GetLeaderInfoRequest struct {
 
 func (x *GetLeaderInfoRequest) Reset() {
 	*x = GetLeaderInfoRequest{}
-	mi := &file_rockskv_proto_msgTypes[59]
+	mi := &file_rockskv_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3754,7 +4151,7 @@ func (x *GetLeaderInfoRequest) String() string {
 func (*GetLeaderInfoRequest) ProtoMessage() {}
 
 func (x *GetLeaderInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[59]
+	mi := &file_rockskv_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3767,7 +4164,7 @@ func (x *GetLeaderInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLeaderInfoRequest.ProtoReflect.Descriptor instead.
 func (*GetLeaderInfoRequest) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{59}
+	return file_rockskv_proto_rawDescGZIP(), []int{64}
 }
 
 type GetLeaderInfoResponse struct {
@@ -3782,7 +4179,7 @@ type GetLeaderInfoResponse struct {
 
 func (x *GetLeaderInfoResponse) Reset() {
 	*x = GetLeaderInfoResponse{}
-	mi := &file_rockskv_proto_msgTypes[60]
+	mi := &file_rockskv_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3794,7 +4191,7 @@ func (x *GetLeaderInfoResponse) String() string {
 func (*GetLeaderInfoResponse) ProtoMessage() {}
 
 func (x *GetLeaderInfoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_rockskv_proto_msgTypes[60]
+	mi := &file_rockskv_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3807,7 +4204,7 @@ func (x *GetLeaderInfoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLeaderInfoResponse.ProtoReflect.Descriptor instead.
 func (*GetLeaderInfoResponse) Descriptor() ([]byte, []int) {
-	return file_rockskv_proto_rawDescGZIP(), []int{60}
+	return file_rockskv_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *GetLeaderInfoResponse) GetLeaderId() string {
@@ -3858,7 +4255,26 @@ const file_rockskv_proto_rawDesc = "" +
 	"\rDeleteRequest\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\fR\x03key\"*\n" +
 	"\x0eDeleteResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"H\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"\x9f\x01\n" +
+	"\x0ePatchOperation\x12.\n" +
+	"\x02op\x18\x01 \x01(\x0e2\x1e.rockskv.PatchOperation.OpTypeR\x02op\x12\x12\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\x12\x14\n" +
+	"\x05value\x18\x03 \x01(\fR\x05value\"3\n" +
+	"\x06OpType\x12\a\n" +
+	"\x03SET\x10\x00\x12\n" +
+	"\n" +
+	"\x06DELETE\x10\x01\x12\b\n" +
+	"\x04INCR\x10\x02\x12\n" +
+	"\n" +
+	"\x06APPEND\x10\x03\"Y\n" +
+	"\fPatchRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\fR\x03key\x127\n" +
+	"\n" +
+	"operations\x18\x02 \x03(\v2\x17.rockskv.PatchOperationR\n" +
+	"operations\"F\n" +
+	"\rPatchResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x1b\n" +
+	"\tnew_value\x18\x02 \x01(\fR\bnewValue\"H\n" +
 	"\bKeyValue\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\fR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\fR\x05value\x12\x14\n" +
@@ -3891,7 +4307,16 @@ const file_rockskv_proto_rawDesc = "" +
 	"\fpartition_id\x18\x02 \x01(\rR\vpartitionId\"[\n" +
 	"\x15StorageDeleteResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12(\n" +
-	"\x05error\x18\x02 \x01(\x0e2\x12.rockskv.ErrorCodeR\x05error\"d\n" +
+	"\x05error\x18\x02 \x01(\x0e2\x12.rockskv.ErrorCodeR\x05error\"i\n" +
+	"\x13StoragePatchRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\fR\x03key\x12\x1d\n" +
+	"\n" +
+	"patch_data\x18\x02 \x01(\fR\tpatchData\x12!\n" +
+	"\fpartition_id\x18\x03 \x01(\rR\vpartitionId\"w\n" +
+	"\x14StoragePatchResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x1b\n" +
+	"\tnew_value\x18\x02 \x01(\fR\bnewValue\x12(\n" +
+	"\x05error\x18\x03 \x01(\x0e2\x12.rockskv.ErrorCodeR\x05error\"d\n" +
 	"\x16StorageBatchPutRequest\x12'\n" +
 	"\x05items\x18\x01 \x03(\v2\x11.rockskv.KeyValueR\x05items\x12!\n" +
 	"\fpartition_id\x18\x02 \x01(\rR\vpartitionId\"s\n" +
@@ -4026,13 +4451,14 @@ const file_rockskv_proto_rawDesc = "" +
 	"\x10ReplicateRequest\x12!\n" +
 	"\fpartition_id\x18\x01 \x01(\rR\vpartitionId\x123\n" +
 	"\aentries\x18\x02 \x03(\v2\x19.rockskv.ReplicationEntryR\aentries\x12#\n" +
-	"\rcommit_offset\x18\x03 \x01(\x03R\fcommitOffset\"\x8d\x01\n" +
+	"\rcommit_offset\x18\x03 \x01(\x03R\fcommitOffset\"\xc2\x01\n" +
 	"\x10ReplicationEntry\x12\x16\n" +
 	"\x06offset\x18\x01 \x01(\x03R\x06offset\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\fR\x03key\x12\x14\n" +
 	"\x05value\x18\x03 \x01(\fR\x05value\x12\x1b\n" +
 	"\tis_delete\x18\x04 \x01(\bR\bisDelete\x12\x1c\n" +
-	"\ttimestamp\x18\x05 \x01(\x03R\ttimestamp\"\x82\x01\n" +
+	"\ttimestamp\x18\x05 \x01(\x03R\ttimestamp\x123\n" +
+	"\aop_type\x18\x06 \x01(\x0e2\x1a.rockskv.ReplicationOpTypeR\x06opType\"\x82\x01\n" +
 	"\x11ReplicateResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12.\n" +
 	"\x13last_applied_offset\x18\x02 \x01(\x03R\x11lastAppliedOffset\x12#\n" +
@@ -4108,7 +4534,12 @@ const file_rockskv_proto_rawDesc = "" +
 	"\x11MIGRATION_CATCHUP\x10\x03\x12\x17\n" +
 	"\x13MIGRATION_SWITCHING\x10\x04\x12\x16\n" +
 	"\x12MIGRATION_COMPLETE\x10\x05\x12\x14\n" +
-	"\x10MIGRATION_FAILED\x10\x06*T\n" +
+	"\x10MIGRATION_FAILED\x10\x06*H\n" +
+	"\x11ReplicationOpType\x12\x0e\n" +
+	"\n" +
+	"REP_OP_PUT\x10\x00\x12\x11\n" +
+	"\rREP_OP_DELETE\x10\x01\x12\x10\n" +
+	"\fREP_OP_PATCH\x10\x02*T\n" +
 	"\n" +
 	"NodeStatus\x12\x0f\n" +
 	"\vNODE_ONLINE\x10\x00\x12\x10\n" +
@@ -4119,17 +4550,19 @@ const file_rockskv_proto_rawDesc = "" +
 	"\fPRIORITY_LOW\x10\x00\x12\x13\n" +
 	"\x0fPRIORITY_NORMAL\x10\x01\x12\x11\n" +
 	"\rPRIORITY_HIGH\x10\x02\x12\x13\n" +
-	"\x0fPRIORITY_URGENT\x10\x032\xac\x02\n" +
+	"\x0fPRIORITY_URGENT\x10\x032\xe4\x02\n" +
 	"\tKVService\x120\n" +
 	"\x03Get\x12\x13.rockskv.GetRequest\x1a\x14.rockskv.GetResponse\x120\n" +
 	"\x03Put\x12\x13.rockskv.PutRequest\x1a\x14.rockskv.PutResponse\x129\n" +
-	"\x06Delete\x12\x16.rockskv.DeleteRequest\x1a\x17.rockskv.DeleteResponse\x12?\n" +
+	"\x06Delete\x12\x16.rockskv.DeleteRequest\x1a\x17.rockskv.DeleteResponse\x126\n" +
+	"\x05Patch\x12\x15.rockskv.PatchRequest\x1a\x16.rockskv.PatchResponse\x12?\n" +
 	"\bBatchGet\x12\x18.rockskv.BatchGetRequest\x1a\x19.rockskv.BatchGetResponse\x12?\n" +
-	"\bBatchPut\x12\x18.rockskv.BatchPutRequest\x1a\x19.rockskv.BatchPutResponse2\xcc\x04\n" +
+	"\bBatchPut\x12\x18.rockskv.BatchPutRequest\x1a\x19.rockskv.BatchPutResponse2\x92\x05\n" +
 	"\x0eStorageService\x12>\n" +
 	"\x03Get\x12\x1a.rockskv.StorageGetRequest\x1a\x1b.rockskv.StorageGetResponse\x12>\n" +
 	"\x03Put\x12\x1a.rockskv.StoragePutRequest\x1a\x1b.rockskv.StoragePutResponse\x12G\n" +
-	"\x06Delete\x12\x1d.rockskv.StorageDeleteRequest\x1a\x1e.rockskv.StorageDeleteResponse\x12M\n" +
+	"\x06Delete\x12\x1d.rockskv.StorageDeleteRequest\x1a\x1e.rockskv.StorageDeleteResponse\x12D\n" +
+	"\x05Patch\x12\x1c.rockskv.StoragePatchRequest\x1a\x1d.rockskv.StoragePatchResponse\x12M\n" +
 	"\bBatchPut\x12\x1f.rockskv.StorageBatchPutRequest\x1a .rockskv.StorageBatchPutResponse\x12;\n" +
 	"\tExportSST\x12\x19.rockskv.ExportSSTRequest\x1a\x11.rockskv.SSTChunk0\x01\x12<\n" +
 	"\tIngestSST\x12\x11.rockskv.SSTChunk\x1a\x1a.rockskv.IngestSSTResponse(\x01\x12B\n" +
@@ -4164,159 +4597,174 @@ func file_rockskv_proto_rawDescGZIP() []byte {
 	return file_rockskv_proto_rawDescData
 }
 
-var file_rockskv_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
-var file_rockskv_proto_msgTypes = make([]protoimpl.MessageInfo, 61)
+var file_rockskv_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
+var file_rockskv_proto_msgTypes = make([]protoimpl.MessageInfo, 66)
 var file_rockskv_proto_goTypes = []any{
 	(ErrorCode)(0),                       // 0: rockskv.ErrorCode
 	(ClusterState)(0),                    // 1: rockskv.ClusterState
 	(NodeRole)(0),                        // 2: rockskv.NodeRole
 	(PartitionStatus)(0),                 // 3: rockskv.PartitionStatus
 	(MigrationState)(0),                  // 4: rockskv.MigrationState
-	(NodeStatus)(0),                      // 5: rockskv.NodeStatus
-	(MigrationPriority)(0),               // 6: rockskv.MigrationPriority
-	(*GetRequest)(nil),                   // 7: rockskv.GetRequest
-	(*GetResponse)(nil),                  // 8: rockskv.GetResponse
-	(*PutRequest)(nil),                   // 9: rockskv.PutRequest
-	(*PutResponse)(nil),                  // 10: rockskv.PutResponse
-	(*DeleteRequest)(nil),                // 11: rockskv.DeleteRequest
-	(*DeleteResponse)(nil),               // 12: rockskv.DeleteResponse
-	(*KeyValue)(nil),                     // 13: rockskv.KeyValue
-	(*BatchGetRequest)(nil),              // 14: rockskv.BatchGetRequest
-	(*BatchGetResponse)(nil),             // 15: rockskv.BatchGetResponse
-	(*BatchPutRequest)(nil),              // 16: rockskv.BatchPutRequest
-	(*BatchPutResponse)(nil),             // 17: rockskv.BatchPutResponse
-	(*StorageGetRequest)(nil),            // 18: rockskv.StorageGetRequest
-	(*StorageGetResponse)(nil),           // 19: rockskv.StorageGetResponse
-	(*StoragePutRequest)(nil),            // 20: rockskv.StoragePutRequest
-	(*StoragePutResponse)(nil),           // 21: rockskv.StoragePutResponse
-	(*StorageDeleteRequest)(nil),         // 22: rockskv.StorageDeleteRequest
-	(*StorageDeleteResponse)(nil),        // 23: rockskv.StorageDeleteResponse
-	(*StorageBatchPutRequest)(nil),       // 24: rockskv.StorageBatchPutRequest
-	(*StorageBatchPutResponse)(nil),      // 25: rockskv.StorageBatchPutResponse
-	(*ExportSSTRequest)(nil),             // 26: rockskv.ExportSSTRequest
-	(*SSTChunk)(nil),                     // 27: rockskv.SSTChunk
-	(*IngestSSTResponse)(nil),            // 28: rockskv.IngestSSTResponse
-	(*RegisterNodeRequest)(nil),          // 29: rockskv.RegisterNodeRequest
-	(*RegisterNodeResponse)(nil),         // 30: rockskv.RegisterNodeResponse
-	(*HeartbeatRequest)(nil),             // 31: rockskv.HeartbeatRequest
-	(*HeartbeatResponse)(nil),            // 32: rockskv.HeartbeatResponse
-	(*GetRouteTableRequest)(nil),         // 33: rockskv.GetRouteTableRequest
-	(*GetRouteTableResponse)(nil),        // 34: rockskv.GetRouteTableResponse
-	(*SubscribeRequest)(nil),             // 35: rockskv.SubscribeRequest
-	(*RouteUpdate)(nil),                  // 36: rockskv.RouteUpdate
-	(*RouteTable)(nil),                   // 37: rockskv.RouteTable
-	(*PartitionInfo)(nil),                // 38: rockskv.PartitionInfo
-	(*TriggerRebalanceRequest)(nil),      // 39: rockskv.TriggerRebalanceRequest
-	(*TriggerRebalanceResponse)(nil),     // 40: rockskv.TriggerRebalanceResponse
-	(*GetMigrationStatusRequest)(nil),    // 41: rockskv.GetMigrationStatusRequest
-	(*GetMigrationStatusResponse)(nil),   // 42: rockskv.GetMigrationStatusResponse
-	(*PartitionMigrationStatus)(nil),     // 43: rockskv.PartitionMigrationStatus
-	(*CancelMigrationRequest)(nil),       // 44: rockskv.CancelMigrationRequest
-	(*CancelMigrationResponse)(nil),      // 45: rockskv.CancelMigrationResponse
-	(*GetClusterInfoRequest)(nil),        // 46: rockskv.GetClusterInfoRequest
-	(*GetClusterInfoResponse)(nil),       // 47: rockskv.GetClusterInfoResponse
-	(*InitClusterRequest)(nil),           // 48: rockskv.InitClusterRequest
-	(*InitClusterResponse)(nil),          // 49: rockskv.InitClusterResponse
-	(*AcquireLeaseRequest)(nil),          // 50: rockskv.AcquireLeaseRequest
-	(*AcquireLeaseResponse)(nil),         // 51: rockskv.AcquireLeaseResponse
-	(*RenewLeaseRequest)(nil),            // 52: rockskv.RenewLeaseRequest
-	(*RenewLeaseResponse)(nil),           // 53: rockskv.RenewLeaseResponse
-	(*RevokeLeaseRequest)(nil),           // 54: rockskv.RevokeLeaseRequest
-	(*RevokeLeaseResponse)(nil),          // 55: rockskv.RevokeLeaseResponse
-	(*ReplicateRequest)(nil),             // 56: rockskv.ReplicateRequest
-	(*ReplicationEntry)(nil),             // 57: rockskv.ReplicationEntry
-	(*ReplicateResponse)(nil),            // 58: rockskv.ReplicateResponse
-	(*GetReplicationStatusRequest)(nil),  // 59: rockskv.GetReplicationStatusRequest
-	(*GetReplicationStatusResponse)(nil), // 60: rockskv.GetReplicationStatusResponse
-	(*ShutdownNodeRequest)(nil),          // 61: rockskv.ShutdownNodeRequest
-	(*ShutdownNodeResponse)(nil),         // 62: rockskv.ShutdownNodeResponse
-	(*GetNodeStatusRequest)(nil),         // 63: rockskv.GetNodeStatusRequest
-	(*GetNodeStatusResponse)(nil),        // 64: rockskv.GetNodeStatusResponse
-	(*MigrationConfig)(nil),              // 65: rockskv.MigrationConfig
-	(*GetLeaderInfoRequest)(nil),         // 66: rockskv.GetLeaderInfoRequest
-	(*GetLeaderInfoResponse)(nil),        // 67: rockskv.GetLeaderInfoResponse
+	(ReplicationOpType)(0),               // 5: rockskv.ReplicationOpType
+	(NodeStatus)(0),                      // 6: rockskv.NodeStatus
+	(MigrationPriority)(0),               // 7: rockskv.MigrationPriority
+	(PatchOperation_OpType)(0),           // 8: rockskv.PatchOperation.OpType
+	(*GetRequest)(nil),                   // 9: rockskv.GetRequest
+	(*GetResponse)(nil),                  // 10: rockskv.GetResponse
+	(*PutRequest)(nil),                   // 11: rockskv.PutRequest
+	(*PutResponse)(nil),                  // 12: rockskv.PutResponse
+	(*DeleteRequest)(nil),                // 13: rockskv.DeleteRequest
+	(*DeleteResponse)(nil),               // 14: rockskv.DeleteResponse
+	(*PatchOperation)(nil),               // 15: rockskv.PatchOperation
+	(*PatchRequest)(nil),                 // 16: rockskv.PatchRequest
+	(*PatchResponse)(nil),                // 17: rockskv.PatchResponse
+	(*KeyValue)(nil),                     // 18: rockskv.KeyValue
+	(*BatchGetRequest)(nil),              // 19: rockskv.BatchGetRequest
+	(*BatchGetResponse)(nil),             // 20: rockskv.BatchGetResponse
+	(*BatchPutRequest)(nil),              // 21: rockskv.BatchPutRequest
+	(*BatchPutResponse)(nil),             // 22: rockskv.BatchPutResponse
+	(*StorageGetRequest)(nil),            // 23: rockskv.StorageGetRequest
+	(*StorageGetResponse)(nil),           // 24: rockskv.StorageGetResponse
+	(*StoragePutRequest)(nil),            // 25: rockskv.StoragePutRequest
+	(*StoragePutResponse)(nil),           // 26: rockskv.StoragePutResponse
+	(*StorageDeleteRequest)(nil),         // 27: rockskv.StorageDeleteRequest
+	(*StorageDeleteResponse)(nil),        // 28: rockskv.StorageDeleteResponse
+	(*StoragePatchRequest)(nil),          // 29: rockskv.StoragePatchRequest
+	(*StoragePatchResponse)(nil),         // 30: rockskv.StoragePatchResponse
+	(*StorageBatchPutRequest)(nil),       // 31: rockskv.StorageBatchPutRequest
+	(*StorageBatchPutResponse)(nil),      // 32: rockskv.StorageBatchPutResponse
+	(*ExportSSTRequest)(nil),             // 33: rockskv.ExportSSTRequest
+	(*SSTChunk)(nil),                     // 34: rockskv.SSTChunk
+	(*IngestSSTResponse)(nil),            // 35: rockskv.IngestSSTResponse
+	(*RegisterNodeRequest)(nil),          // 36: rockskv.RegisterNodeRequest
+	(*RegisterNodeResponse)(nil),         // 37: rockskv.RegisterNodeResponse
+	(*HeartbeatRequest)(nil),             // 38: rockskv.HeartbeatRequest
+	(*HeartbeatResponse)(nil),            // 39: rockskv.HeartbeatResponse
+	(*GetRouteTableRequest)(nil),         // 40: rockskv.GetRouteTableRequest
+	(*GetRouteTableResponse)(nil),        // 41: rockskv.GetRouteTableResponse
+	(*SubscribeRequest)(nil),             // 42: rockskv.SubscribeRequest
+	(*RouteUpdate)(nil),                  // 43: rockskv.RouteUpdate
+	(*RouteTable)(nil),                   // 44: rockskv.RouteTable
+	(*PartitionInfo)(nil),                // 45: rockskv.PartitionInfo
+	(*TriggerRebalanceRequest)(nil),      // 46: rockskv.TriggerRebalanceRequest
+	(*TriggerRebalanceResponse)(nil),     // 47: rockskv.TriggerRebalanceResponse
+	(*GetMigrationStatusRequest)(nil),    // 48: rockskv.GetMigrationStatusRequest
+	(*GetMigrationStatusResponse)(nil),   // 49: rockskv.GetMigrationStatusResponse
+	(*PartitionMigrationStatus)(nil),     // 50: rockskv.PartitionMigrationStatus
+	(*CancelMigrationRequest)(nil),       // 51: rockskv.CancelMigrationRequest
+	(*CancelMigrationResponse)(nil),      // 52: rockskv.CancelMigrationResponse
+	(*GetClusterInfoRequest)(nil),        // 53: rockskv.GetClusterInfoRequest
+	(*GetClusterInfoResponse)(nil),       // 54: rockskv.GetClusterInfoResponse
+	(*InitClusterRequest)(nil),           // 55: rockskv.InitClusterRequest
+	(*InitClusterResponse)(nil),          // 56: rockskv.InitClusterResponse
+	(*AcquireLeaseRequest)(nil),          // 57: rockskv.AcquireLeaseRequest
+	(*AcquireLeaseResponse)(nil),         // 58: rockskv.AcquireLeaseResponse
+	(*RenewLeaseRequest)(nil),            // 59: rockskv.RenewLeaseRequest
+	(*RenewLeaseResponse)(nil),           // 60: rockskv.RenewLeaseResponse
+	(*RevokeLeaseRequest)(nil),           // 61: rockskv.RevokeLeaseRequest
+	(*RevokeLeaseResponse)(nil),          // 62: rockskv.RevokeLeaseResponse
+	(*ReplicateRequest)(nil),             // 63: rockskv.ReplicateRequest
+	(*ReplicationEntry)(nil),             // 64: rockskv.ReplicationEntry
+	(*ReplicateResponse)(nil),            // 65: rockskv.ReplicateResponse
+	(*GetReplicationStatusRequest)(nil),  // 66: rockskv.GetReplicationStatusRequest
+	(*GetReplicationStatusResponse)(nil), // 67: rockskv.GetReplicationStatusResponse
+	(*ShutdownNodeRequest)(nil),          // 68: rockskv.ShutdownNodeRequest
+	(*ShutdownNodeResponse)(nil),         // 69: rockskv.ShutdownNodeResponse
+	(*GetNodeStatusRequest)(nil),         // 70: rockskv.GetNodeStatusRequest
+	(*GetNodeStatusResponse)(nil),        // 71: rockskv.GetNodeStatusResponse
+	(*MigrationConfig)(nil),              // 72: rockskv.MigrationConfig
+	(*GetLeaderInfoRequest)(nil),         // 73: rockskv.GetLeaderInfoRequest
+	(*GetLeaderInfoResponse)(nil),        // 74: rockskv.GetLeaderInfoResponse
 }
 var file_rockskv_proto_depIdxs = []int32{
-	13, // 0: rockskv.BatchGetResponse.items:type_name -> rockskv.KeyValue
-	13, // 1: rockskv.BatchPutRequest.items:type_name -> rockskv.KeyValue
-	0,  // 2: rockskv.StorageGetResponse.error:type_name -> rockskv.ErrorCode
-	0,  // 3: rockskv.StoragePutResponse.error:type_name -> rockskv.ErrorCode
-	0,  // 4: rockskv.StorageDeleteResponse.error:type_name -> rockskv.ErrorCode
-	13, // 5: rockskv.StorageBatchPutRequest.items:type_name -> rockskv.KeyValue
-	0,  // 6: rockskv.StorageBatchPutResponse.error:type_name -> rockskv.ErrorCode
-	2,  // 7: rockskv.RegisterNodeRequest.role:type_name -> rockskv.NodeRole
-	37, // 8: rockskv.GetRouteTableResponse.route_table:type_name -> rockskv.RouteTable
-	38, // 9: rockskv.RouteUpdate.partitions:type_name -> rockskv.PartitionInfo
-	38, // 10: rockskv.RouteTable.partitions:type_name -> rockskv.PartitionInfo
-	3,  // 11: rockskv.PartitionInfo.status:type_name -> rockskv.PartitionStatus
-	4,  // 12: rockskv.PartitionInfo.migration_state:type_name -> rockskv.MigrationState
-	43, // 13: rockskv.GetMigrationStatusResponse.partition_status:type_name -> rockskv.PartitionMigrationStatus
-	4,  // 14: rockskv.PartitionMigrationStatus.state:type_name -> rockskv.MigrationState
-	1,  // 15: rockskv.GetClusterInfoResponse.state:type_name -> rockskv.ClusterState
-	57, // 16: rockskv.ReplicateRequest.entries:type_name -> rockskv.ReplicationEntry
-	5,  // 17: rockskv.GetNodeStatusResponse.status:type_name -> rockskv.NodeStatus
-	6,  // 18: rockskv.MigrationConfig.priority:type_name -> rockskv.MigrationPriority
-	7,  // 19: rockskv.KVService.Get:input_type -> rockskv.GetRequest
-	9,  // 20: rockskv.KVService.Put:input_type -> rockskv.PutRequest
-	11, // 21: rockskv.KVService.Delete:input_type -> rockskv.DeleteRequest
-	14, // 22: rockskv.KVService.BatchGet:input_type -> rockskv.BatchGetRequest
-	16, // 23: rockskv.KVService.BatchPut:input_type -> rockskv.BatchPutRequest
-	18, // 24: rockskv.StorageService.Get:input_type -> rockskv.StorageGetRequest
-	20, // 25: rockskv.StorageService.Put:input_type -> rockskv.StoragePutRequest
-	22, // 26: rockskv.StorageService.Delete:input_type -> rockskv.StorageDeleteRequest
-	24, // 27: rockskv.StorageService.BatchPut:input_type -> rockskv.StorageBatchPutRequest
-	26, // 28: rockskv.StorageService.ExportSST:input_type -> rockskv.ExportSSTRequest
-	27, // 29: rockskv.StorageService.IngestSST:input_type -> rockskv.SSTChunk
-	56, // 30: rockskv.StorageService.Replicate:input_type -> rockskv.ReplicateRequest
-	59, // 31: rockskv.StorageService.GetReplicationStatus:input_type -> rockskv.GetReplicationStatusRequest
-	29, // 32: rockskv.MetadataService.RegisterNode:input_type -> rockskv.RegisterNodeRequest
-	31, // 33: rockskv.MetadataService.Heartbeat:input_type -> rockskv.HeartbeatRequest
-	33, // 34: rockskv.MetadataService.GetRouteTable:input_type -> rockskv.GetRouteTableRequest
-	35, // 35: rockskv.MetadataService.SubscribeRouteUpdates:input_type -> rockskv.SubscribeRequest
-	46, // 36: rockskv.MetadataService.GetClusterInfo:input_type -> rockskv.GetClusterInfoRequest
-	48, // 37: rockskv.MetadataService.InitCluster:input_type -> rockskv.InitClusterRequest
-	39, // 38: rockskv.MetadataService.TriggerRebalance:input_type -> rockskv.TriggerRebalanceRequest
-	41, // 39: rockskv.MetadataService.GetMigrationStatus:input_type -> rockskv.GetMigrationStatusRequest
-	44, // 40: rockskv.MetadataService.CancelMigration:input_type -> rockskv.CancelMigrationRequest
-	50, // 41: rockskv.MetadataService.AcquirePartitionLease:input_type -> rockskv.AcquireLeaseRequest
-	52, // 42: rockskv.MetadataService.RenewPartitionLease:input_type -> rockskv.RenewLeaseRequest
-	54, // 43: rockskv.MetadataService.RevokePartitionLease:input_type -> rockskv.RevokeLeaseRequest
-	61, // 44: rockskv.MetadataService.ShutdownNode:input_type -> rockskv.ShutdownNodeRequest
-	63, // 45: rockskv.MetadataService.GetNodeStatus:input_type -> rockskv.GetNodeStatusRequest
-	66, // 46: rockskv.MetadataService.GetLeaderInfo:input_type -> rockskv.GetLeaderInfoRequest
-	8,  // 47: rockskv.KVService.Get:output_type -> rockskv.GetResponse
-	10, // 48: rockskv.KVService.Put:output_type -> rockskv.PutResponse
-	12, // 49: rockskv.KVService.Delete:output_type -> rockskv.DeleteResponse
-	15, // 50: rockskv.KVService.BatchGet:output_type -> rockskv.BatchGetResponse
-	17, // 51: rockskv.KVService.BatchPut:output_type -> rockskv.BatchPutResponse
-	19, // 52: rockskv.StorageService.Get:output_type -> rockskv.StorageGetResponse
-	21, // 53: rockskv.StorageService.Put:output_type -> rockskv.StoragePutResponse
-	23, // 54: rockskv.StorageService.Delete:output_type -> rockskv.StorageDeleteResponse
-	25, // 55: rockskv.StorageService.BatchPut:output_type -> rockskv.StorageBatchPutResponse
-	27, // 56: rockskv.StorageService.ExportSST:output_type -> rockskv.SSTChunk
-	28, // 57: rockskv.StorageService.IngestSST:output_type -> rockskv.IngestSSTResponse
-	58, // 58: rockskv.StorageService.Replicate:output_type -> rockskv.ReplicateResponse
-	60, // 59: rockskv.StorageService.GetReplicationStatus:output_type -> rockskv.GetReplicationStatusResponse
-	30, // 60: rockskv.MetadataService.RegisterNode:output_type -> rockskv.RegisterNodeResponse
-	32, // 61: rockskv.MetadataService.Heartbeat:output_type -> rockskv.HeartbeatResponse
-	34, // 62: rockskv.MetadataService.GetRouteTable:output_type -> rockskv.GetRouteTableResponse
-	36, // 63: rockskv.MetadataService.SubscribeRouteUpdates:output_type -> rockskv.RouteUpdate
-	47, // 64: rockskv.MetadataService.GetClusterInfo:output_type -> rockskv.GetClusterInfoResponse
-	49, // 65: rockskv.MetadataService.InitCluster:output_type -> rockskv.InitClusterResponse
-	40, // 66: rockskv.MetadataService.TriggerRebalance:output_type -> rockskv.TriggerRebalanceResponse
-	42, // 67: rockskv.MetadataService.GetMigrationStatus:output_type -> rockskv.GetMigrationStatusResponse
-	45, // 68: rockskv.MetadataService.CancelMigration:output_type -> rockskv.CancelMigrationResponse
-	51, // 69: rockskv.MetadataService.AcquirePartitionLease:output_type -> rockskv.AcquireLeaseResponse
-	53, // 70: rockskv.MetadataService.RenewPartitionLease:output_type -> rockskv.RenewLeaseResponse
-	55, // 71: rockskv.MetadataService.RevokePartitionLease:output_type -> rockskv.RevokeLeaseResponse
-	62, // 72: rockskv.MetadataService.ShutdownNode:output_type -> rockskv.ShutdownNodeResponse
-	64, // 73: rockskv.MetadataService.GetNodeStatus:output_type -> rockskv.GetNodeStatusResponse
-	67, // 74: rockskv.MetadataService.GetLeaderInfo:output_type -> rockskv.GetLeaderInfoResponse
-	47, // [47:75] is the sub-list for method output_type
-	19, // [19:47] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	8,  // 0: rockskv.PatchOperation.op:type_name -> rockskv.PatchOperation.OpType
+	15, // 1: rockskv.PatchRequest.operations:type_name -> rockskv.PatchOperation
+	18, // 2: rockskv.BatchGetResponse.items:type_name -> rockskv.KeyValue
+	18, // 3: rockskv.BatchPutRequest.items:type_name -> rockskv.KeyValue
+	0,  // 4: rockskv.StorageGetResponse.error:type_name -> rockskv.ErrorCode
+	0,  // 5: rockskv.StoragePutResponse.error:type_name -> rockskv.ErrorCode
+	0,  // 6: rockskv.StorageDeleteResponse.error:type_name -> rockskv.ErrorCode
+	0,  // 7: rockskv.StoragePatchResponse.error:type_name -> rockskv.ErrorCode
+	18, // 8: rockskv.StorageBatchPutRequest.items:type_name -> rockskv.KeyValue
+	0,  // 9: rockskv.StorageBatchPutResponse.error:type_name -> rockskv.ErrorCode
+	2,  // 10: rockskv.RegisterNodeRequest.role:type_name -> rockskv.NodeRole
+	44, // 11: rockskv.GetRouteTableResponse.route_table:type_name -> rockskv.RouteTable
+	45, // 12: rockskv.RouteUpdate.partitions:type_name -> rockskv.PartitionInfo
+	45, // 13: rockskv.RouteTable.partitions:type_name -> rockskv.PartitionInfo
+	3,  // 14: rockskv.PartitionInfo.status:type_name -> rockskv.PartitionStatus
+	4,  // 15: rockskv.PartitionInfo.migration_state:type_name -> rockskv.MigrationState
+	50, // 16: rockskv.GetMigrationStatusResponse.partition_status:type_name -> rockskv.PartitionMigrationStatus
+	4,  // 17: rockskv.PartitionMigrationStatus.state:type_name -> rockskv.MigrationState
+	1,  // 18: rockskv.GetClusterInfoResponse.state:type_name -> rockskv.ClusterState
+	64, // 19: rockskv.ReplicateRequest.entries:type_name -> rockskv.ReplicationEntry
+	5,  // 20: rockskv.ReplicationEntry.op_type:type_name -> rockskv.ReplicationOpType
+	6,  // 21: rockskv.GetNodeStatusResponse.status:type_name -> rockskv.NodeStatus
+	7,  // 22: rockskv.MigrationConfig.priority:type_name -> rockskv.MigrationPriority
+	9,  // 23: rockskv.KVService.Get:input_type -> rockskv.GetRequest
+	11, // 24: rockskv.KVService.Put:input_type -> rockskv.PutRequest
+	13, // 25: rockskv.KVService.Delete:input_type -> rockskv.DeleteRequest
+	16, // 26: rockskv.KVService.Patch:input_type -> rockskv.PatchRequest
+	19, // 27: rockskv.KVService.BatchGet:input_type -> rockskv.BatchGetRequest
+	21, // 28: rockskv.KVService.BatchPut:input_type -> rockskv.BatchPutRequest
+	23, // 29: rockskv.StorageService.Get:input_type -> rockskv.StorageGetRequest
+	25, // 30: rockskv.StorageService.Put:input_type -> rockskv.StoragePutRequest
+	27, // 31: rockskv.StorageService.Delete:input_type -> rockskv.StorageDeleteRequest
+	29, // 32: rockskv.StorageService.Patch:input_type -> rockskv.StoragePatchRequest
+	31, // 33: rockskv.StorageService.BatchPut:input_type -> rockskv.StorageBatchPutRequest
+	33, // 34: rockskv.StorageService.ExportSST:input_type -> rockskv.ExportSSTRequest
+	34, // 35: rockskv.StorageService.IngestSST:input_type -> rockskv.SSTChunk
+	63, // 36: rockskv.StorageService.Replicate:input_type -> rockskv.ReplicateRequest
+	66, // 37: rockskv.StorageService.GetReplicationStatus:input_type -> rockskv.GetReplicationStatusRequest
+	36, // 38: rockskv.MetadataService.RegisterNode:input_type -> rockskv.RegisterNodeRequest
+	38, // 39: rockskv.MetadataService.Heartbeat:input_type -> rockskv.HeartbeatRequest
+	40, // 40: rockskv.MetadataService.GetRouteTable:input_type -> rockskv.GetRouteTableRequest
+	42, // 41: rockskv.MetadataService.SubscribeRouteUpdates:input_type -> rockskv.SubscribeRequest
+	53, // 42: rockskv.MetadataService.GetClusterInfo:input_type -> rockskv.GetClusterInfoRequest
+	55, // 43: rockskv.MetadataService.InitCluster:input_type -> rockskv.InitClusterRequest
+	46, // 44: rockskv.MetadataService.TriggerRebalance:input_type -> rockskv.TriggerRebalanceRequest
+	48, // 45: rockskv.MetadataService.GetMigrationStatus:input_type -> rockskv.GetMigrationStatusRequest
+	51, // 46: rockskv.MetadataService.CancelMigration:input_type -> rockskv.CancelMigrationRequest
+	57, // 47: rockskv.MetadataService.AcquirePartitionLease:input_type -> rockskv.AcquireLeaseRequest
+	59, // 48: rockskv.MetadataService.RenewPartitionLease:input_type -> rockskv.RenewLeaseRequest
+	61, // 49: rockskv.MetadataService.RevokePartitionLease:input_type -> rockskv.RevokeLeaseRequest
+	68, // 50: rockskv.MetadataService.ShutdownNode:input_type -> rockskv.ShutdownNodeRequest
+	70, // 51: rockskv.MetadataService.GetNodeStatus:input_type -> rockskv.GetNodeStatusRequest
+	73, // 52: rockskv.MetadataService.GetLeaderInfo:input_type -> rockskv.GetLeaderInfoRequest
+	10, // 53: rockskv.KVService.Get:output_type -> rockskv.GetResponse
+	12, // 54: rockskv.KVService.Put:output_type -> rockskv.PutResponse
+	14, // 55: rockskv.KVService.Delete:output_type -> rockskv.DeleteResponse
+	17, // 56: rockskv.KVService.Patch:output_type -> rockskv.PatchResponse
+	20, // 57: rockskv.KVService.BatchGet:output_type -> rockskv.BatchGetResponse
+	22, // 58: rockskv.KVService.BatchPut:output_type -> rockskv.BatchPutResponse
+	24, // 59: rockskv.StorageService.Get:output_type -> rockskv.StorageGetResponse
+	26, // 60: rockskv.StorageService.Put:output_type -> rockskv.StoragePutResponse
+	28, // 61: rockskv.StorageService.Delete:output_type -> rockskv.StorageDeleteResponse
+	30, // 62: rockskv.StorageService.Patch:output_type -> rockskv.StoragePatchResponse
+	32, // 63: rockskv.StorageService.BatchPut:output_type -> rockskv.StorageBatchPutResponse
+	34, // 64: rockskv.StorageService.ExportSST:output_type -> rockskv.SSTChunk
+	35, // 65: rockskv.StorageService.IngestSST:output_type -> rockskv.IngestSSTResponse
+	65, // 66: rockskv.StorageService.Replicate:output_type -> rockskv.ReplicateResponse
+	67, // 67: rockskv.StorageService.GetReplicationStatus:output_type -> rockskv.GetReplicationStatusResponse
+	37, // 68: rockskv.MetadataService.RegisterNode:output_type -> rockskv.RegisterNodeResponse
+	39, // 69: rockskv.MetadataService.Heartbeat:output_type -> rockskv.HeartbeatResponse
+	41, // 70: rockskv.MetadataService.GetRouteTable:output_type -> rockskv.GetRouteTableResponse
+	43, // 71: rockskv.MetadataService.SubscribeRouteUpdates:output_type -> rockskv.RouteUpdate
+	54, // 72: rockskv.MetadataService.GetClusterInfo:output_type -> rockskv.GetClusterInfoResponse
+	56, // 73: rockskv.MetadataService.InitCluster:output_type -> rockskv.InitClusterResponse
+	47, // 74: rockskv.MetadataService.TriggerRebalance:output_type -> rockskv.TriggerRebalanceResponse
+	49, // 75: rockskv.MetadataService.GetMigrationStatus:output_type -> rockskv.GetMigrationStatusResponse
+	52, // 76: rockskv.MetadataService.CancelMigration:output_type -> rockskv.CancelMigrationResponse
+	58, // 77: rockskv.MetadataService.AcquirePartitionLease:output_type -> rockskv.AcquireLeaseResponse
+	60, // 78: rockskv.MetadataService.RenewPartitionLease:output_type -> rockskv.RenewLeaseResponse
+	62, // 79: rockskv.MetadataService.RevokePartitionLease:output_type -> rockskv.RevokeLeaseResponse
+	69, // 80: rockskv.MetadataService.ShutdownNode:output_type -> rockskv.ShutdownNodeResponse
+	71, // 81: rockskv.MetadataService.GetNodeStatus:output_type -> rockskv.GetNodeStatusResponse
+	74, // 82: rockskv.MetadataService.GetLeaderInfo:output_type -> rockskv.GetLeaderInfoResponse
+	53, // [53:83] is the sub-list for method output_type
+	23, // [23:53] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_rockskv_proto_init() }
@@ -4329,8 +4777,8 @@ func file_rockskv_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_rockskv_proto_rawDesc), len(file_rockskv_proto_rawDesc)),
-			NumEnums:      7,
-			NumMessages:   61,
+			NumEnums:      9,
+			NumMessages:   66,
 			NumExtensions: 0,
 			NumServices:   3,
 		},

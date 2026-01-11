@@ -22,6 +22,7 @@ const (
 	KVService_Get_FullMethodName      = "/rockskv.KVService/Get"
 	KVService_Put_FullMethodName      = "/rockskv.KVService/Put"
 	KVService_Delete_FullMethodName   = "/rockskv.KVService/Delete"
+	KVService_Patch_FullMethodName    = "/rockskv.KVService/Patch"
 	KVService_BatchGet_FullMethodName = "/rockskv.KVService/BatchGet"
 	KVService_BatchPut_FullMethodName = "/rockskv.KVService/BatchPut"
 )
@@ -35,6 +36,7 @@ type KVServiceClient interface {
 	Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error)
 	Put(ctx context.Context, in *PutRequest, opts ...grpc.CallOption) (*PutResponse, error)
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error)
+	Patch(ctx context.Context, in *PatchRequest, opts ...grpc.CallOption) (*PatchResponse, error)
 	BatchGet(ctx context.Context, in *BatchGetRequest, opts ...grpc.CallOption) (*BatchGetResponse, error)
 	BatchPut(ctx context.Context, in *BatchPutRequest, opts ...grpc.CallOption) (*BatchPutResponse, error)
 }
@@ -77,6 +79,16 @@ func (c *kVServiceClient) Delete(ctx context.Context, in *DeleteRequest, opts ..
 	return out, nil
 }
 
+func (c *kVServiceClient) Patch(ctx context.Context, in *PatchRequest, opts ...grpc.CallOption) (*PatchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PatchResponse)
+	err := c.cc.Invoke(ctx, KVService_Patch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *kVServiceClient) BatchGet(ctx context.Context, in *BatchGetRequest, opts ...grpc.CallOption) (*BatchGetResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(BatchGetResponse)
@@ -106,6 +118,7 @@ type KVServiceServer interface {
 	Get(context.Context, *GetRequest) (*GetResponse, error)
 	Put(context.Context, *PutRequest) (*PutResponse, error)
 	Delete(context.Context, *DeleteRequest) (*DeleteResponse, error)
+	Patch(context.Context, *PatchRequest) (*PatchResponse, error)
 	BatchGet(context.Context, *BatchGetRequest) (*BatchGetResponse, error)
 	BatchPut(context.Context, *BatchPutRequest) (*BatchPutResponse, error)
 	mustEmbedUnimplementedKVServiceServer()
@@ -126,6 +139,9 @@ func (UnimplementedKVServiceServer) Put(context.Context, *PutRequest) (*PutRespo
 }
 func (UnimplementedKVServiceServer) Delete(context.Context, *DeleteRequest) (*DeleteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Delete not implemented")
+}
+func (UnimplementedKVServiceServer) Patch(context.Context, *PatchRequest) (*PatchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Patch not implemented")
 }
 func (UnimplementedKVServiceServer) BatchGet(context.Context, *BatchGetRequest) (*BatchGetResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method BatchGet not implemented")
@@ -208,6 +224,24 @@ func _KVService_Delete_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KVService_Patch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PatchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServiceServer).Patch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KVService_Patch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServiceServer).Patch(ctx, req.(*PatchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _KVService_BatchGet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(BatchGetRequest)
 	if err := dec(in); err != nil {
@@ -264,6 +298,10 @@ var KVService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _KVService_Delete_Handler,
 		},
 		{
+			MethodName: "Patch",
+			Handler:    _KVService_Patch_Handler,
+		},
+		{
 			MethodName: "BatchGet",
 			Handler:    _KVService_BatchGet_Handler,
 		},
@@ -280,6 +318,7 @@ const (
 	StorageService_Get_FullMethodName                  = "/rockskv.StorageService/Get"
 	StorageService_Put_FullMethodName                  = "/rockskv.StorageService/Put"
 	StorageService_Delete_FullMethodName               = "/rockskv.StorageService/Delete"
+	StorageService_Patch_FullMethodName                = "/rockskv.StorageService/Patch"
 	StorageService_BatchPut_FullMethodName             = "/rockskv.StorageService/BatchPut"
 	StorageService_ExportSST_FullMethodName            = "/rockskv.StorageService/ExportSST"
 	StorageService_IngestSST_FullMethodName            = "/rockskv.StorageService/IngestSST"
@@ -296,6 +335,7 @@ type StorageServiceClient interface {
 	Get(ctx context.Context, in *StorageGetRequest, opts ...grpc.CallOption) (*StorageGetResponse, error)
 	Put(ctx context.Context, in *StoragePutRequest, opts ...grpc.CallOption) (*StoragePutResponse, error)
 	Delete(ctx context.Context, in *StorageDeleteRequest, opts ...grpc.CallOption) (*StorageDeleteResponse, error)
+	Patch(ctx context.Context, in *StoragePatchRequest, opts ...grpc.CallOption) (*StoragePatchResponse, error)
 	BatchPut(ctx context.Context, in *StorageBatchPutRequest, opts ...grpc.CallOption) (*StorageBatchPutResponse, error)
 	ExportSST(ctx context.Context, in *ExportSSTRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SSTChunk], error)
 	IngestSST(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[SSTChunk, IngestSSTResponse], error)
@@ -336,6 +376,16 @@ func (c *storageServiceClient) Delete(ctx context.Context, in *StorageDeleteRequ
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StorageDeleteResponse)
 	err := c.cc.Invoke(ctx, StorageService_Delete_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *storageServiceClient) Patch(ctx context.Context, in *StoragePatchRequest, opts ...grpc.CallOption) (*StoragePatchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StoragePatchResponse)
+	err := c.cc.Invoke(ctx, StorageService_Patch_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -413,6 +463,7 @@ type StorageServiceServer interface {
 	Get(context.Context, *StorageGetRequest) (*StorageGetResponse, error)
 	Put(context.Context, *StoragePutRequest) (*StoragePutResponse, error)
 	Delete(context.Context, *StorageDeleteRequest) (*StorageDeleteResponse, error)
+	Patch(context.Context, *StoragePatchRequest) (*StoragePatchResponse, error)
 	BatchPut(context.Context, *StorageBatchPutRequest) (*StorageBatchPutResponse, error)
 	ExportSST(*ExportSSTRequest, grpc.ServerStreamingServer[SSTChunk]) error
 	IngestSST(grpc.ClientStreamingServer[SSTChunk, IngestSSTResponse]) error
@@ -437,6 +488,9 @@ func (UnimplementedStorageServiceServer) Put(context.Context, *StoragePutRequest
 }
 func (UnimplementedStorageServiceServer) Delete(context.Context, *StorageDeleteRequest) (*StorageDeleteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Delete not implemented")
+}
+func (UnimplementedStorageServiceServer) Patch(context.Context, *StoragePatchRequest) (*StoragePatchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Patch not implemented")
 }
 func (UnimplementedStorageServiceServer) BatchPut(context.Context, *StorageBatchPutRequest) (*StorageBatchPutResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method BatchPut not implemented")
@@ -524,6 +578,24 @@ func _StorageService_Delete_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(StorageServiceServer).Delete(ctx, req.(*StorageDeleteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StorageService_Patch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StoragePatchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StorageServiceServer).Patch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StorageService_Patch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StorageServiceServer).Patch(ctx, req.(*StoragePatchRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -618,6 +690,10 @@ var StorageService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Delete",
 			Handler:    _StorageService_Delete_Handler,
+		},
+		{
+			MethodName: "Patch",
+			Handler:    _StorageService_Patch_Handler,
 		},
 		{
 			MethodName: "BatchPut",

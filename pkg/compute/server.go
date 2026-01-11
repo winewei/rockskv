@@ -14,6 +14,7 @@ import (
 
 	"github.com/winewei/rockskv/pkg/common"
 	pb "github.com/winewei/rockskv/pkg/proto"
+	"github.com/winewei/rockskv/pkg/storage"
 )
 
 const (
@@ -316,6 +317,97 @@ func (s *Server) doDelete(ctx context.Context, nodeID string, key []byte, partit
 	}
 
 	return nil
+}
+
+// Patch implements KVService.Patch - sparse update (partial modification)
+func (s *Server) Patch(ctx context.Context, req *pb.PatchRequest) (*pb.PatchResponse, error) {
+	start := time.Now()
+	defer func() {
+		common.StorageLatency.WithLabelValues("client_patch").Observe(time.Since(start).Seconds())
+	}()
+
+	// Get partition nodes
+	primary, _, partitionID, err := s.router.GetPartitionNodes(req.Key)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
+	}
+
+	// Convert protobuf operations to internal patch format
+	patchData, err := s.convertPatchOperations(req.Operations)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid patch operations: %v", err)
+	}
+
+	// Patch only Primary - Replica will sync via WAL replication
+	newValue, err := s.doPatch(ctx, primary, req.Key, patchData, partitionID)
+	if err != nil {
+		s.logger.Error("Patch failed",
+			zap.Uint32("partition_id", partitionID),
+			zap.Error(err),
+		)
+		return nil, status.Errorf(codes.Internal, "patch failed: %v", err)
+	}
+
+	return &pb.PatchResponse{Success: true, NewValue: newValue}, nil
+}
+
+// convertPatchOperations converts protobuf patch operations to internal format
+func (s *Server) convertPatchOperations(ops []*pb.PatchOperation) ([]byte, error) {
+	patch := &storage.Patch{
+		Operations: make([]storage.PatchOperation, len(ops)),
+	}
+
+	for i, op := range ops {
+		var opType storage.PatchOpType
+		switch op.Op {
+		case pb.PatchOperation_SET:
+			opType = storage.PatchOpSet
+		case pb.PatchOperation_DELETE:
+			opType = storage.PatchOpDelete
+		case pb.PatchOperation_INCR:
+			opType = storage.PatchOpIncr
+		case pb.PatchOperation_APPEND:
+			opType = storage.PatchOpAppend
+		}
+		patch.Operations[i] = storage.PatchOperation{
+			Op:    opType,
+			Path:  op.Path,
+			Value: op.Value,
+		}
+	}
+
+	return patch.Encode(), nil
+}
+
+// doPatch performs a patch operation on a specific node
+func (s *Server) doPatch(ctx context.Context, nodeID string, key, patchData []byte, partitionID uint32) ([]byte, error) {
+	addr, err := s.nodeResolver.ResolveAddr(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve node address: %w", err)
+	}
+
+	client, err := s.pool.GetStorageClient(addr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get storage client: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+	defer cancel()
+
+	resp, err := client.Patch(ctx, &pb.StoragePatchRequest{
+		Key:         key,
+		PatchData:   patchData,
+		PartitionId: partitionID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("storage patch failed: %w", err)
+	}
+
+	if !resp.Success || resp.Error != pb.ErrorCode_OK {
+		return nil, fmt.Errorf("storage error: %s", resp.Error.String())
+	}
+
+	return resp.NewValue, nil
 }
 
 // BatchGet implements KVService.BatchGet

@@ -24,6 +24,7 @@ const (
 	// Command types
 	CmdTypePut    uint8 = 1
 	CmdTypeDelete uint8 = 2
+	CmdTypePatch  uint8 = 3 // Sparse update (partial modification)
 
 	// Log file settings
 	LogFileMaxSize   = 64 * 1024 * 1024 // 64MB per log file
@@ -254,6 +255,12 @@ func (cl *CommandLog) AppendPut(key, value []byte) (uint64, error) {
 // AppendDelete appends a delete command
 func (cl *CommandLog) AppendDelete(key []byte) (uint64, error) {
 	return cl.Append(CmdTypeDelete, key, nil)
+}
+
+// AppendPatch appends a patch (sparse update) command
+// The patchData should be encoded using Patch.Encode()
+func (cl *CommandLog) AppendPatch(key []byte, patchData []byte) (uint64, error) {
+	return cl.Append(CmdTypePatch, key, patchData)
 }
 
 // GetCurrentSequence returns the current sequence number
@@ -524,6 +531,27 @@ func (cl *CommandLog) ReplayTo(db *RocksDB, fromSeq uint64) (uint64, error) {
 				if err := db.Delete(entry.Key); err != nil {
 					f.Close()
 					return lastSeq, fmt.Errorf("replay delete failed at seq %d: %w", entry.Sequence, err)
+				}
+			case CmdTypePatch:
+				// Apply patch: read current value, apply patch, write back
+				currentValue, _, err := db.Get(entry.Key)
+				if err != nil {
+					f.Close()
+					return lastSeq, fmt.Errorf("replay patch get failed at seq %d: %w", entry.Sequence, err)
+				}
+				patch, err := DecodePatch(entry.Value)
+				if err != nil {
+					f.Close()
+					return lastSeq, fmt.Errorf("replay patch decode failed at seq %d: %w", entry.Sequence, err)
+				}
+				newValue, err := patch.Apply(currentValue)
+				if err != nil {
+					f.Close()
+					return lastSeq, fmt.Errorf("replay patch apply failed at seq %d: %w", entry.Sequence, err)
+				}
+				if err := db.Put(entry.Key, newValue); err != nil {
+					f.Close()
+					return lastSeq, fmt.Errorf("replay patch put failed at seq %d: %w", entry.Sequence, err)
 				}
 			}
 

@@ -7,6 +7,7 @@ service KVService {
   rpc Get(GetRequest) returns (GetResponse);
   rpc Put(PutRequest) returns (PutResponse);
   rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc Patch(PatchRequest) returns (PatchResponse);  // Sparse update
   rpc BatchGet(BatchGetRequest) returns (BatchGetResponse);
   rpc BatchPut(BatchPutRequest) returns (BatchPutResponse);
 }
@@ -16,6 +17,7 @@ service StorageService {
   rpc Get(StorageGetRequest) returns (StorageGetResponse);
   rpc Put(StoragePutRequest) returns (StoragePutResponse);
   rpc Delete(StorageDeleteRequest) returns (StorageDeleteResponse);
+  rpc Patch(StoragePatchRequest) returns (StoragePatchResponse);  // Sparse update
   rpc BatchPut(StorageBatchPutRequest) returns (StorageBatchPutResponse);
   rpc ExportSST(ExportSSTRequest) returns (stream SSTChunk);
   rpc IngestSST(stream SSTChunk) returns (IngestSSTResponse);
@@ -82,6 +84,30 @@ message DeleteResponse {
   bool success = 1;
 }
 
+// PatchOperation defines a single field operation
+message PatchOperation {
+  enum OpType {
+    SET = 0;     // Set field value
+    DELETE = 1;  // Delete field
+    INCR = 2;    // Increment numeric field
+    APPEND = 3;  // Append to array field
+  }
+  OpType op = 1;
+  string path = 2;   // Field path (e.g., "name", "address.city")
+  bytes value = 3;   // Value for SET/INCR/APPEND operations
+}
+
+// PatchRequest for sparse update (partial modification)
+message PatchRequest {
+  bytes key = 1;
+  repeated PatchOperation operations = 2;
+}
+
+message PatchResponse {
+  bool success = 1;
+  bytes new_value = 2;  // Optional: return the updated value
+}
+
 message KeyValue {
   bytes key = 1;
   bytes value = 2;
@@ -137,6 +163,19 @@ message StorageDeleteRequest {
 message StorageDeleteResponse {
   bool success = 1;
   ErrorCode error = 2;
+}
+
+// StoragePatchRequest for sparse update at storage level
+message StoragePatchRequest {
+  bytes key = 1;
+  bytes patch_data = 2;  // Encoded patch operations
+  uint32 partition_id = 3;
+}
+
+message StoragePatchResponse {
+  bool success = 1;
+  bytes new_value = 2;  // Updated value after patch
+  ErrorCode error = 3;
 }
 
 message StorageBatchPutRequest {
@@ -376,13 +415,21 @@ message ReplicateRequest {
   int64 commit_offset = 3;  // Offset to commit up to
 }
 
+// ReplicationOpType defines the type of replication operation
+enum ReplicationOpType {
+  REP_OP_PUT = 0;     // Full value replacement
+  REP_OP_DELETE = 1;  // Delete key
+  REP_OP_PATCH = 2;   // Sparse update (partial modification)
+}
+
 // ReplicationEntry represents a single write operation to replicate
 message ReplicationEntry {
   int64 offset = 1;         // Unique offset for this entry
   bytes key = 2;
-  bytes value = 3;          // Empty for delete operations
-  bool is_delete = 4;
+  bytes value = 3;          // Value for PUT, patch data for PATCH, empty for DELETE
+  bool is_delete = 4;       // Deprecated: use op_type instead
   int64 timestamp = 5;      // Write timestamp in nanoseconds
+  ReplicationOpType op_type = 6;  // Operation type (PUT, DELETE, PATCH)
 }
 
 message ReplicateResponse {

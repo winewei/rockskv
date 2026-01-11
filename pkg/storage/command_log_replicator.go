@@ -137,6 +137,14 @@ func (clr *CommandLogReplicator) AppendDelete(key []byte) (uint64, error) {
 	return clr.commandLog.AppendDelete(key)
 }
 
+// AppendPatch appends a patch (sparse update) command to the log
+func (clr *CommandLogReplicator) AppendPatch(key []byte, patchData []byte) (uint64, error) {
+	if clr.commandLog == nil {
+		return 0, nil
+	}
+	return clr.commandLog.AppendPatch(key, patchData)
+}
+
 // GetCurrentSequence returns the current sequence number
 func (clr *CommandLogReplicator) GetCurrentSequence() uint64 {
 	if clr.commandLog == nil {
@@ -281,13 +289,22 @@ func (clr *CommandLogReplicator) sendBatch(entries []*CommandEntry) error {
 	pbEntries := make([]*pb.ReplicationEntry, len(entries))
 	var maxOffset int64
 	for i, entry := range entries {
-		isDelete := entry.CmdType == CmdTypeDelete
+		var opType pb.ReplicationOpType
+		switch entry.CmdType {
+		case CmdTypePut:
+			opType = pb.ReplicationOpType_REP_OP_PUT
+		case CmdTypeDelete:
+			opType = pb.ReplicationOpType_REP_OP_DELETE
+		case CmdTypePatch:
+			opType = pb.ReplicationOpType_REP_OP_PATCH
+		}
 		pbEntries[i] = &pb.ReplicationEntry{
 			Offset:    int64(entry.Sequence),
 			Key:       entry.Key,
 			Value:     entry.Value,
-			IsDelete:  isDelete,
+			IsDelete:  entry.CmdType == CmdTypeDelete, // Keep for backward compatibility
 			Timestamp: entry.Timestamp,
+			OpType:    opType,
 		}
 		if int64(entry.Sequence) > maxOffset {
 			maxOffset = int64(entry.Sequence)
