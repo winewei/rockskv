@@ -196,6 +196,7 @@ message StoragePutRequest {
   bytes key = 1;
   bytes value = 2;
   uint32 partition_id = 3;
+  uint64 epoch = 4;  // Fencing token for split-brain prevention
 }
 
 message StoragePutResponse {
@@ -206,6 +207,7 @@ message StoragePutResponse {
 message StorageDeleteRequest {
   bytes key = 1;
   uint32 partition_id = 2;
+  uint64 epoch = 3;  // Fencing token for split-brain prevention
 }
 
 message StorageDeleteResponse {
@@ -233,6 +235,7 @@ message StorageSetFieldsRequest {
   bytes primary_key = 1;
   repeated FieldValue fields = 2;
   uint32 partition_id = 3;
+  uint64 epoch = 4;  // Fencing token for split-brain prevention
 }
 
 message StorageSetFieldsResponse {
@@ -245,6 +248,7 @@ message StorageDeleteFieldRequest {
   bytes primary_key = 1;
   string field_name = 2;
   uint32 partition_id = 3;
+  uint64 epoch = 4;  // Fencing token for split-brain prevention
 }
 
 message StorageDeleteFieldResponse {
@@ -267,6 +271,7 @@ message StorageGetAllFieldsResponse {
 message StorageBatchPutRequest {
   repeated KeyValue items = 1;
   uint32 partition_id = 2;
+  uint64 epoch = 3;  // Fencing token for split-brain prevention
 }
 
 message StorageBatchPutResponse {
@@ -304,6 +309,7 @@ enum ErrorCode {
   KEY_NOT_FOUND = 3;
   INTERNAL_ERROR = 4;
   NOT_PRIMARY = 5;  // Write rejected because node is not primary for this partition
+  EPOCH_FENCED = 6;  // Write rejected because epoch is stale (split-brain prevention)
 }
 
 // ========== MetadataService 消息定义 ==========
@@ -357,6 +363,8 @@ message PartitionInfo {
   // Migration fields
   string migration_target = 5;  // Target node during migration
   MigrationState migration_state = 6;
+  // Fencing token - incremented on every primary change
+  uint64 epoch = 7;
 }
 
 // ========== 枚举类型 ==========

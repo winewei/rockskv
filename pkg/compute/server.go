@@ -149,7 +149,7 @@ func (s *Server) Get(ctx context.Context, req *pb.GetRequest) (*pb.GetResponse, 
 	}()
 
 	// Get partition nodes
-	primary, replica, partitionID, err := s.router.GetPartitionNodes(req.Key)
+	primary, replica, partitionID, _, err := s.router.GetPartitionNodes(req.Key)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
 	}
@@ -214,14 +214,14 @@ func (s *Server) Put(ctx context.Context, req *pb.PutRequest) (*pb.PutResponse, 
 		common.StorageLatency.WithLabelValues("client_put").Observe(time.Since(start).Seconds())
 	}()
 
-	// Get partition nodes
-	primary, _, partitionID, err := s.router.GetPartitionNodes(req.Key)
+	// Get partition nodes and epoch
+	primary, _, partitionID, epoch, err := s.router.GetPartitionNodes(req.Key)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
 	}
 
 	// Write only to Primary - Replica will sync via WAL replication
-	if err := s.doPut(ctx, primary, req.Key, req.Value, partitionID); err != nil {
+	if err := s.doPut(ctx, primary, req.Key, req.Value, partitionID, epoch); err != nil {
 		s.logger.Error("Put failed",
 			zap.Uint32("partition_id", partitionID),
 			zap.Error(err),
@@ -233,7 +233,7 @@ func (s *Server) Put(ctx context.Context, req *pb.PutRequest) (*pb.PutResponse, 
 }
 
 // doPut performs a put operation on a specific node
-func (s *Server) doPut(ctx context.Context, nodeID string, key, value []byte, partitionID uint32) error {
+func (s *Server) doPut(ctx context.Context, nodeID string, key, value []byte, partitionID uint32, epoch uint64) error {
 	addr, err := s.nodeResolver.ResolveAddr(nodeID)
 	if err != nil {
 		return fmt.Errorf("failed to resolve node address: %w", err)
@@ -251,6 +251,7 @@ func (s *Server) doPut(ctx context.Context, nodeID string, key, value []byte, pa
 		Key:         key,
 		Value:       value,
 		PartitionId: partitionID,
+		Epoch:       epoch,
 	})
 	if err != nil {
 		return fmt.Errorf("storage put failed: %w", err)
@@ -270,14 +271,14 @@ func (s *Server) Delete(ctx context.Context, req *pb.DeleteRequest) (*pb.DeleteR
 		common.StorageLatency.WithLabelValues("client_delete").Observe(time.Since(start).Seconds())
 	}()
 
-	// Get partition nodes
-	primary, _, partitionID, err := s.router.GetPartitionNodes(req.Key)
+	// Get partition nodes and epoch
+	primary, _, partitionID, epoch, err := s.router.GetPartitionNodes(req.Key)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
 	}
 
 	// Delete only from Primary - Replica will sync via WAL replication
-	if err := s.doDelete(ctx, primary, req.Key, partitionID); err != nil {
+	if err := s.doDelete(ctx, primary, req.Key, partitionID, epoch); err != nil {
 		s.logger.Error("Delete failed",
 			zap.Uint32("partition_id", partitionID),
 			zap.Error(err),
@@ -289,7 +290,7 @@ func (s *Server) Delete(ctx context.Context, req *pb.DeleteRequest) (*pb.DeleteR
 }
 
 // doDelete performs a delete operation on a specific node
-func (s *Server) doDelete(ctx context.Context, nodeID string, key []byte, partitionID uint32) error {
+func (s *Server) doDelete(ctx context.Context, nodeID string, key []byte, partitionID uint32, epoch uint64) error {
 	addr, err := s.nodeResolver.ResolveAddr(nodeID)
 	if err != nil {
 		return fmt.Errorf("failed to resolve node address: %w", err)
@@ -306,6 +307,7 @@ func (s *Server) doDelete(ctx context.Context, nodeID string, key []byte, partit
 	resp, err := client.Delete(ctx, &pb.StorageDeleteRequest{
 		Key:         key,
 		PartitionId: partitionID,
+		Epoch:       epoch,
 	})
 	if err != nil {
 		return fmt.Errorf("storage delete failed: %w", err)
@@ -326,7 +328,7 @@ func (s *Server) GetField(ctx context.Context, req *pb.GetFieldRequest) (*pb.Get
 	}()
 
 	// Get partition nodes
-	primary, replica, partitionID, err := s.router.GetPartitionNodes(req.PrimaryKey)
+	primary, replica, partitionID, _, err := s.router.GetPartitionNodes(req.PrimaryKey)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
 	}
@@ -394,8 +396,8 @@ func (s *Server) SetField(ctx context.Context, req *pb.SetFieldRequest) (*pb.Set
 		common.StorageLatency.WithLabelValues("client_set_field").Observe(time.Since(start).Seconds())
 	}()
 
-	// Get partition nodes
-	primary, _, partitionID, err := s.router.GetPartitionNodes(req.PrimaryKey)
+	// Get partition nodes and epoch
+	primary, _, partitionID, epoch, err := s.router.GetPartitionNodes(req.PrimaryKey)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
 	}
@@ -403,7 +405,7 @@ func (s *Server) SetField(ctx context.Context, req *pb.SetFieldRequest) (*pb.Set
 	// Set field only on Primary - Replica will sync via command log replication
 	if err := s.doSetFields(ctx, primary, req.PrimaryKey, []*pb.FieldValue{
 		{FieldName: req.FieldName, Value: req.Value, IsDelete: false},
-	}, partitionID); err != nil {
+	}, partitionID, epoch); err != nil {
 		s.logger.Error("SetField failed",
 			zap.Uint32("partition_id", partitionID),
 			zap.Error(err),
@@ -421,14 +423,14 @@ func (s *Server) SetFields(ctx context.Context, req *pb.SetFieldsRequest) (*pb.S
 		common.StorageLatency.WithLabelValues("client_set_fields").Observe(time.Since(start).Seconds())
 	}()
 
-	// Get partition nodes
-	primary, _, partitionID, err := s.router.GetPartitionNodes(req.PrimaryKey)
+	// Get partition nodes and epoch
+	primary, _, partitionID, epoch, err := s.router.GetPartitionNodes(req.PrimaryKey)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
 	}
 
 	// Set fields only on Primary - Replica will sync via command log replication
-	if err := s.doSetFields(ctx, primary, req.PrimaryKey, req.Fields, partitionID); err != nil {
+	if err := s.doSetFields(ctx, primary, req.PrimaryKey, req.Fields, partitionID, epoch); err != nil {
 		s.logger.Error("SetFields failed",
 			zap.Uint32("partition_id", partitionID),
 			zap.Error(err),
@@ -440,7 +442,7 @@ func (s *Server) SetFields(ctx context.Context, req *pb.SetFieldsRequest) (*pb.S
 }
 
 // doSetFields performs a set fields operation on a specific node
-func (s *Server) doSetFields(ctx context.Context, nodeID string, pk []byte, fields []*pb.FieldValue, partitionID uint32) error {
+func (s *Server) doSetFields(ctx context.Context, nodeID string, pk []byte, fields []*pb.FieldValue, partitionID uint32, epoch uint64) error {
 	addr, err := s.nodeResolver.ResolveAddr(nodeID)
 	if err != nil {
 		return fmt.Errorf("failed to resolve node address: %w", err)
@@ -458,6 +460,7 @@ func (s *Server) doSetFields(ctx context.Context, nodeID string, pk []byte, fiel
 		PrimaryKey:  pk,
 		Fields:      fields,
 		PartitionId: partitionID,
+		Epoch:       epoch,
 	})
 	if err != nil {
 		return fmt.Errorf("storage set_fields failed: %w", err)
@@ -477,14 +480,14 @@ func (s *Server) DeleteField(ctx context.Context, req *pb.DeleteFieldRequest) (*
 		common.StorageLatency.WithLabelValues("client_delete_field").Observe(time.Since(start).Seconds())
 	}()
 
-	// Get partition nodes
-	primary, _, partitionID, err := s.router.GetPartitionNodes(req.PrimaryKey)
+	// Get partition nodes and epoch
+	primary, _, partitionID, epoch, err := s.router.GetPartitionNodes(req.PrimaryKey)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
 	}
 
 	// Delete field only on Primary - Replica will sync via command log replication
-	if err := s.doDeleteField(ctx, primary, req.PrimaryKey, req.FieldName, partitionID); err != nil {
+	if err := s.doDeleteField(ctx, primary, req.PrimaryKey, req.FieldName, partitionID, epoch); err != nil {
 		s.logger.Error("DeleteField failed",
 			zap.Uint32("partition_id", partitionID),
 			zap.Error(err),
@@ -496,7 +499,7 @@ func (s *Server) DeleteField(ctx context.Context, req *pb.DeleteFieldRequest) (*
 }
 
 // doDeleteField performs a delete field operation on a specific node
-func (s *Server) doDeleteField(ctx context.Context, nodeID string, pk []byte, fieldName string, partitionID uint32) error {
+func (s *Server) doDeleteField(ctx context.Context, nodeID string, pk []byte, fieldName string, partitionID uint32, epoch uint64) error {
 	addr, err := s.nodeResolver.ResolveAddr(nodeID)
 	if err != nil {
 		return fmt.Errorf("failed to resolve node address: %w", err)
@@ -514,6 +517,7 @@ func (s *Server) doDeleteField(ctx context.Context, nodeID string, pk []byte, fi
 		PrimaryKey:  pk,
 		FieldName:   fieldName,
 		PartitionId: partitionID,
+		Epoch:       epoch,
 	})
 	if err != nil {
 		return fmt.Errorf("storage delete_field failed: %w", err)
@@ -534,7 +538,7 @@ func (s *Server) GetAllFields(ctx context.Context, req *pb.GetAllFieldsRequest) 
 	}()
 
 	// Get partition nodes
-	primary, replica, partitionID, err := s.router.GetPartitionNodes(req.PrimaryKey)
+	primary, replica, partitionID, _, err := s.router.GetPartitionNodes(req.PrimaryKey)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
 	}
@@ -642,7 +646,7 @@ func (s *Server) BatchPut(ctx context.Context, req *pb.BatchPutRequest) (*pb.Bat
 	var mu sync.Mutex
 
 	for partitionID, items := range partitionItems {
-		primary, _, _, err := s.router.GetPartitionNodesByID(partitionID)
+		primary, _, _, epoch, err := s.router.GetPartitionNodesByID(partitionID)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
 		}
@@ -650,16 +654,16 @@ func (s *Server) BatchPut(ctx context.Context, req *pb.BatchPutRequest) (*pb.Bat
 		wg.Add(1)
 
 		// Write only to Primary - Replica will sync via Command Log replication
-		go func(nodeID string, pid uint32, items []*pb.KeyValue) {
+		go func(nodeID string, pid uint32, ep uint64, items []*pb.KeyValue) {
 			defer wg.Done()
-			if err := s.doBatchPut(ctx, nodeID, items, pid); err != nil {
+			if err := s.doBatchPut(ctx, nodeID, items, pid, ep); err != nil {
 				errCh <- err
 			} else {
 				mu.Lock()
 				count += int32(len(items))
 				mu.Unlock()
 			}
-		}(primary, partitionID, items)
+		}(primary, partitionID, epoch, items)
 	}
 
 	wg.Wait()
@@ -678,7 +682,7 @@ func (s *Server) BatchPut(ctx context.Context, req *pb.BatchPutRequest) (*pb.Bat
 }
 
 // doBatchPut performs a batch put operation on a specific node
-func (s *Server) doBatchPut(ctx context.Context, nodeID string, items []*pb.KeyValue, partitionID uint32) error {
+func (s *Server) doBatchPut(ctx context.Context, nodeID string, items []*pb.KeyValue, partitionID uint32, epoch uint64) error {
 	addr, err := s.nodeResolver.ResolveAddr(nodeID)
 	if err != nil {
 		return fmt.Errorf("failed to resolve node address: %w", err)
@@ -695,6 +699,7 @@ func (s *Server) doBatchPut(ctx context.Context, nodeID string, items []*pb.KeyV
 	resp, err := client.BatchPut(ctx, &pb.StorageBatchPutRequest{
 		Items:       items,
 		PartitionId: partitionID,
+		Epoch:       epoch,
 	})
 	if err != nil {
 		return fmt.Errorf("storage batch put failed: %w", err)

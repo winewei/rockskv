@@ -322,6 +322,15 @@ func (s *Server) Put(ctx context.Context, req *pb.StoragePutRequest) (*pb.Storag
 		}, nil
 	}
 
+	// Validate epoch to prevent split-brain writes
+	if err := s.partitionManager.ValidateEpoch(req.PartitionId, req.Epoch); err != nil {
+		common.StorageOperations.WithLabelValues("put", "epoch_fenced").Inc()
+		return &pb.StoragePutResponse{
+			Success: false,
+			Error:   pb.ErrorCode_EPOCH_FENCED,
+		}, nil
+	}
+
 	if err := s.partitionManager.Put(req.Key, req.Value, req.PartitionId); err != nil {
 		s.logger.Error("Put failed",
 			zap.Error(err),
@@ -366,6 +375,15 @@ func (s *Server) Delete(ctx context.Context, req *pb.StorageDeleteRequest) (*pb.
 		return &pb.StorageDeleteResponse{
 			Success: false,
 			Error:   pb.ErrorCode_NOT_PRIMARY,
+		}, nil
+	}
+
+	// Validate epoch to prevent split-brain writes
+	if err := s.partitionManager.ValidateEpoch(req.PartitionId, req.Epoch); err != nil {
+		common.StorageOperations.WithLabelValues("delete", "epoch_fenced").Inc()
+		return &pb.StorageDeleteResponse{
+			Success: false,
+			Error:   pb.ErrorCode_EPOCH_FENCED,
 		}, nil
 	}
 
@@ -462,6 +480,15 @@ func (s *Server) SetFields(ctx context.Context, req *pb.StorageSetFieldsRequest)
 		}, nil
 	}
 
+	// Validate epoch to prevent split-brain writes
+	if err := s.partitionManager.ValidateEpoch(req.PartitionId, req.Epoch); err != nil {
+		common.StorageOperations.WithLabelValues("set_fields", "epoch_fenced").Inc()
+		return &pb.StorageSetFieldsResponse{
+			Success: false,
+			Error:   pb.ErrorCode_EPOCH_FENCED,
+		}, nil
+	}
+
 	// Build field batch
 	fb := &FieldBatch{
 		PartitionID: req.PartitionId,
@@ -522,6 +549,15 @@ func (s *Server) DeleteField(ctx context.Context, req *pb.StorageDeleteFieldRequ
 		return &pb.StorageDeleteFieldResponse{
 			Success: false,
 			Error:   pb.ErrorCode_NOT_PRIMARY,
+		}, nil
+	}
+
+	// Validate epoch to prevent split-brain writes
+	if err := s.partitionManager.ValidateEpoch(req.PartitionId, req.Epoch); err != nil {
+		common.StorageOperations.WithLabelValues("delete_field", "epoch_fenced").Inc()
+		return &pb.StorageDeleteFieldResponse{
+			Success: false,
+			Error:   pb.ErrorCode_EPOCH_FENCED,
 		}, nil
 	}
 
@@ -623,6 +659,15 @@ func (s *Server) BatchPut(ctx context.Context, req *pb.StorageBatchPutRequest) (
 		return &pb.StorageBatchPutResponse{
 			Success: false,
 			Error:   pb.ErrorCode_NOT_PRIMARY,
+		}, nil
+	}
+
+	// Validate epoch to prevent split-brain writes
+	if err := s.partitionManager.ValidateEpoch(req.PartitionId, req.Epoch); err != nil {
+		common.StorageOperations.WithLabelValues("batch_put", "epoch_fenced").Inc()
+		return &pb.StorageBatchPutResponse{
+			Success: false,
+			Error:   pb.ErrorCode_EPOCH_FENCED,
 		}, nil
 	}
 
@@ -1048,7 +1093,7 @@ func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAdd
 			}
 
 			if !s.partitionManager.HasPartition(p.PartitionId) {
-				if err := s.partitionManager.AddPartition(p.PartitionId, isPrimary); err != nil {
+				if err := s.partitionManager.AddPartitionWithEpoch(p.PartitionId, isPrimary, p.Epoch); err != nil {
 					s.logger.Warn("Failed to add partition",
 						zap.Uint32("partition_id", p.PartitionId),
 						zap.Error(err),
@@ -1065,6 +1110,9 @@ func (s *Server) updatePartitionsFromRoute(partitions []*pb.PartitionInfo, myAdd
 						s.initializeReplicator(p.PartitionId, false, "")
 					}
 				}
+			} else {
+				// Update existing partition's epoch
+				s.partitionManager.UpdatePartitionEpoch(p.PartitionId, p.Epoch)
 			}
 		}
 	}

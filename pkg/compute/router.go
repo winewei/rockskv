@@ -37,6 +37,7 @@ type PartitionInfo struct {
 	Status          pb.PartitionStatus
 	MigrationTarget string
 	MigrationState  pb.MigrationState
+	Epoch           uint64  // Fencing token for split-brain prevention
 }
 
 // Router handles partition routing
@@ -115,37 +116,37 @@ func CalculatePartition(key []byte) uint32 {
 }
 
 // GetPartitionNodes returns the primary and replica nodes for a key
-func (r *Router) GetPartitionNodes(key []byte) (primary, replica string, partitionID uint32, err error) {
+func (r *Router) GetPartitionNodes(key []byte) (primary, replica string, partitionID uint32, epoch uint64, err error) {
 	partitionID = CalculatePartition(key)
 	return r.GetPartitionNodesByID(partitionID)
 }
 
 // GetPartitionNodesByID returns the primary and replica nodes for a partition ID
-func (r *Router) GetPartitionNodesByID(partitionID uint32) (primary, replica string, pid uint32, err error) {
+func (r *Router) GetPartitionNodesByID(partitionID uint32) (primary, replica string, pid uint32, epoch uint64, err error) {
 	table := r.routeTable.Load().(*RouteTable)
 
 	partition, ok := table.Partitions[partitionID]
 	if !ok {
-		return "", "", partitionID, fmt.Errorf("partition %d not found in route table", partitionID)
+		return "", "", partitionID, 0, fmt.Errorf("partition %d not found in route table", partitionID)
 	}
 
-	return partition.Primary, partition.Replica, partitionID, nil
+	return partition.Primary, partition.Replica, partitionID, partition.Epoch, nil
 }
 
 // GetWriteTargets returns all nodes that should receive writes for a key
 // During migration, this includes the shadow write target
-func (r *Router) GetWriteTargets(key []byte) (targets []string, partitionID uint32, err error) {
+func (r *Router) GetWriteTargets(key []byte) (targets []string, partitionID uint32, epoch uint64, err error) {
 	partitionID = CalculatePartition(key)
 	return r.GetWriteTargetsByID(partitionID)
 }
 
 // GetWriteTargetsByID returns all nodes that should receive writes for a partition ID
-func (r *Router) GetWriteTargetsByID(partitionID uint32) (targets []string, pid uint32, err error) {
+func (r *Router) GetWriteTargetsByID(partitionID uint32) (targets []string, pid uint32, epoch uint64, err error) {
 	table := r.routeTable.Load().(*RouteTable)
 
 	partition, ok := table.Partitions[partitionID]
 	if !ok {
-		return nil, partitionID, fmt.Errorf("partition %d not found in route table", partitionID)
+		return nil, partitionID, 0, fmt.Errorf("partition %d not found in route table", partitionID)
 	}
 
 	// Always include primary and replica
@@ -161,7 +162,7 @@ func (r *Router) GetWriteTargetsByID(partitionID uint32) (targets []string, pid 
 		}
 	}
 
-	return targets, partitionID, nil
+	return targets, partitionID, partition.Epoch, nil
 }
 
 // IsMigrating returns true if the partition is being migrated
@@ -259,6 +260,7 @@ func (r *Router) updateRouteTable(pbTable *pb.RouteTable) {
 			Status:          p.Status,
 			MigrationTarget: p.MigrationTarget,
 			MigrationState:  p.MigrationState,
+			Epoch:           p.Epoch,
 		}
 	}
 
@@ -299,6 +301,7 @@ func (r *Router) updateRouteTableFromUpdate(update *pb.RouteUpdate) {
 			Status:          p.Status,
 			MigrationTarget: p.MigrationTarget,
 			MigrationState:  p.MigrationState,
+			Epoch:           p.Epoch,
 		}
 	}
 

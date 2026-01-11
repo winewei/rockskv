@@ -34,7 +34,8 @@ type PartitionManager struct {
 type Partition struct {
 	ID      uint32
 	Status  pb.PartitionStatus
-	IsPrime bool // true if this node is the primary for this partition
+	IsPrime bool   // true if this node is the primary for this partition
+	Epoch   uint64 // Fencing token for split-brain prevention
 }
 
 // NewPartitionManager creates a new partition manager
@@ -141,6 +142,76 @@ func (pm *PartitionManager) AddPartition(partitionID uint32, isPrimary bool) err
 	)
 
 	common.PartitionGauge.WithLabelValues("normal").Inc()
+	return nil
+}
+
+// AddPartitionWithEpoch adds a partition to this node with an initial epoch
+func (pm *PartitionManager) AddPartitionWithEpoch(partitionID uint32, isPrimary bool, epoch uint64) error {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	if _, exists := pm.partitions[partitionID]; exists {
+		return fmt.Errorf("partition %d already exists", partitionID)
+	}
+
+	pm.partitions[partitionID] = &Partition{
+		ID:      partitionID,
+		Status:  pb.PartitionStatus_NORMAL,
+		IsPrime: isPrimary,
+		Epoch:   epoch,
+	}
+
+	pm.logger.Info("Partition added with epoch",
+		zap.Uint32("partition_id", partitionID),
+		zap.Bool("is_primary", isPrimary),
+		zap.Uint64("epoch", epoch),
+	)
+
+	common.PartitionGauge.WithLabelValues("normal").Inc()
+	return nil
+}
+
+// UpdatePartitionEpoch updates the epoch of a partition
+func (pm *PartitionManager) UpdatePartitionEpoch(partitionID uint32, epoch uint64) error {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	partition, exists := pm.partitions[partitionID]
+	if !exists {
+		return fmt.Errorf("partition %d not found", partitionID)
+	}
+
+	if epoch > partition.Epoch {
+		pm.logger.Info("Partition epoch updated",
+			zap.Uint32("partition_id", partitionID),
+			zap.Uint64("old_epoch", partition.Epoch),
+			zap.Uint64("new_epoch", epoch),
+		)
+		partition.Epoch = epoch
+	}
+
+	return nil
+}
+
+// ValidateEpoch checks if the request epoch matches the partition epoch (for write requests)
+func (pm *PartitionManager) ValidateEpoch(partitionID uint32, requestEpoch uint64) error {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	partition, exists := pm.partitions[partitionID]
+	if !exists {
+		return fmt.Errorf("partition %d not found", partitionID)
+	}
+
+	if requestEpoch != partition.Epoch {
+		pm.logger.Warn("Epoch mismatch - request fenced",
+			zap.Uint32("partition_id", partitionID),
+			zap.Uint64("request_epoch", requestEpoch),
+			zap.Uint64("current_epoch", partition.Epoch),
+		)
+		return fmt.Errorf("epoch mismatch: request=%d, current=%d", requestEpoch, partition.Epoch)
+	}
+
 	return nil
 }
 

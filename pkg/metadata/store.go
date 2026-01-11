@@ -108,6 +108,7 @@ type PartitionInfo struct {
 	Status          PartitionStatus    `json:"status"`
 	MigrationTarget string             `json:"migration_target,omitempty"`
 	MigrationState  pb.MigrationState  `json:"migration_state,omitempty"`
+	Epoch           uint64             `json:"epoch"`  // Fencing token - incremented on every primary change
 }
 
 // PartitionStatus represents the status of a partition

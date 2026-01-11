@@ -235,6 +235,7 @@ func (r *Router) allocatePartitions(ctx context.Context, nodes []*NodeInfo) erro
 			Primary: primary,
 			Replica: replica,
 			Status:  PartitionStatusNormal,
+			Epoch:   1,  // Initialize epoch to 1
 		}
 	}
 
@@ -316,6 +317,7 @@ func (r *Router) RebalancePartitions(ctx context.Context) error {
 		newPartition := &PartitionInfo{
 			ID:     partition.ID,
 			Status: partition.Status,
+			Epoch:  partition.Epoch,  // Preserve current epoch
 		}
 
 		// Only change if necessary (minimize data movement)
@@ -323,6 +325,7 @@ func (r *Router) RebalancePartitions(ctx context.Context) error {
 			newPartition.Primary = partition.Primary
 		} else {
 			newPartition.Primary = newPrimary
+			newPartition.Epoch = partition.Epoch + 1  // Increment epoch on primary change
 			primaryChanges++
 		}
 
@@ -386,12 +389,14 @@ func (r *Router) PromoteReplica(ctx context.Context, partitionID uint32) error {
 			Primary: p.Primary,
 			Replica: p.Replica,
 			Status:  p.Status,
+			Epoch:   p.Epoch,
 		}
 	}
 
-	// Swap for the target partition
+	// Swap for the target partition and bump epoch (primary change)
 	newTable.Partitions[partitionID].Primary = partition.Replica
 	newTable.Partitions[partitionID].Replica = partition.Primary
+	newTable.Partitions[partitionID].Epoch = partition.Epoch + 1  // Increment epoch on primary change
 
 	// Save to etcd while holding lock to prevent concurrent modifications
 	if err := r.store.UpdateRouteTable(ctx, newTable); err != nil {
@@ -432,6 +437,7 @@ func (r *Router) SetPartitionStatus(ctx context.Context, partitionID uint32, sta
 			Status:          p.Status,
 			MigrationTarget: p.MigrationTarget,
 			MigrationState:  p.MigrationState,
+			Epoch:           p.Epoch,
 		}
 	}
 
@@ -516,6 +522,7 @@ func (r *Router) CompleteMigration(ctx context.Context, partitionID uint32, newN
 			Primary: p.Primary,
 			Replica: p.Replica,
 			Status:  p.Status,
+			Epoch:   p.Epoch,
 			// MigrationTarget and MigrationState no longer stored here
 		}
 	}
@@ -527,8 +534,11 @@ func (r *Router) CompleteMigration(ctx context.Context, partitionID uint32, newN
 		if partition.Primary != newNode {
 			newTable.Partitions[partitionID].Replica = partition.Primary
 		}
+		// Increment epoch on primary change
+		newTable.Partitions[partitionID].Epoch = partition.Epoch + 1
 	} else {
 		newTable.Partitions[partitionID].Replica = newNode
+		// No epoch change for replica migration
 	}
 	newTable.Partitions[partitionID].Status = PartitionStatusNormal
 
