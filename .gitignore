@@ -39,3 +39,4 @@ data/
 
 # Docker volumes
 docker-data/
+cli
