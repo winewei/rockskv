@@ -22,9 +22,10 @@ import (
 
 const (
 	// Command types
-	CmdTypePut    uint8 = 1
-	CmdTypeDelete uint8 = 2
-	CmdTypePatch  uint8 = 3 // Sparse update (partial modification)
+	CmdTypePut        uint8 = 1
+	CmdTypeDelete     uint8 = 2
+	CmdTypePatch      uint8 = 3 // Sparse update (JSON patch)
+	CmdTypeFieldBatch uint8 = 4 // Field-level batch update
 
 	// Log file settings
 	LogFileMaxSize   = 64 * 1024 * 1024 // 64MB per log file
@@ -261,6 +262,13 @@ func (cl *CommandLog) AppendDelete(key []byte) (uint64, error) {
 // The patchData should be encoded using Patch.Encode()
 func (cl *CommandLog) AppendPatch(key []byte, patchData []byte) (uint64, error) {
 	return cl.Append(CmdTypePatch, key, patchData)
+}
+
+// AppendFieldBatch appends a field-level batch update command
+// The batchData should be encoded using FieldBatch.Encode()
+func (cl *CommandLog) AppendFieldBatch(batchData []byte) (uint64, error) {
+	// For field batch, key is empty since pk is in batchData
+	return cl.Append(CmdTypeFieldBatch, nil, batchData)
 }
 
 // GetCurrentSequence returns the current sequence number
@@ -552,6 +560,18 @@ func (cl *CommandLog) ReplayTo(db *RocksDB, fromSeq uint64) (uint64, error) {
 				if err := db.Put(entry.Key, newValue); err != nil {
 					f.Close()
 					return lastSeq, fmt.Errorf("replay patch put failed at seq %d: %w", entry.Sequence, err)
+				}
+			case CmdTypeFieldBatch:
+				// Apply field batch: decode and apply each field update
+				fb, err := DecodeFieldBatch(entry.Value)
+				if err != nil {
+					f.Close()
+					return lastSeq, fmt.Errorf("replay field batch decode failed at seq %d: %w", entry.Sequence, err)
+				}
+				fs := NewFieldStorage(db)
+				if err := fs.ApplyFieldBatch(fb); err != nil {
+					f.Close()
+					return lastSeq, fmt.Errorf("replay field batch apply failed at seq %d: %w", entry.Sequence, err)
 				}
 			}
 
