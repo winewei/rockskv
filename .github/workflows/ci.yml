@@ -11,35 +11,6 @@ env:
   ROCKSDB_VERSION: '10.7.5'
 
 jobs:
-  # Build and test without CGO (stub implementation)
-  build-nocgo:
-    name: Build without CGO
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
-        cache: true
-
-    - name: Download Go modules
-      run: go mod download
-
-    - name: Verify dependencies
-      run: go mod verify
-
-    - name: Build without CGO
-      run: |
-        CGO_ENABLED=0 go build -v ./...
-
-    - name: Run tests without CGO
-      run: |
-        CGO_ENABLED=0 go test -v ./...
-
   # Build and test with CGO and RocksDB
   build-cgo:
     name: Build with CGO (RocksDB)
@@ -125,16 +96,14 @@ jobs:
 
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v7
-      env:
-        CGO_ENABLED: '0'
       with:
         version: v2.0.2
-        args: --timeout=5m --build-tags=nocgo
+        args: --timeout=5m
 
   build-linux-binaries:
     name: Build Linux Binaries
     runs-on: ubuntu-latest
-    needs: [build-nocgo, build-cgo, lint]
+    needs: [build-cgo, lint]
 
     steps:
     - name: Checkout code
@@ -176,7 +145,7 @@ jobs:
   build-darwin-binaries:
     name: Build Darwin Binaries (Signed)
     runs-on: macos-latest
-    needs: [build-nocgo, build-cgo, lint]
+    needs: [build-cgo, lint]
 
     steps:
     - name: Checkout code
