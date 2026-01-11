@@ -174,6 +174,18 @@ func (pm *PartitionManager) HasPartition(partitionID uint32) bool {
 	return exists
 }
 
+// IsPrimary checks if this node is the primary for the given partition
+func (pm *PartitionManager) IsPrimary(partitionID uint32) bool {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	partition, exists := pm.partitions[partitionID]
+	if !exists {
+		return false
+	}
+	return partition.IsPrime
+}
+
 // GetPartition returns a partition by ID
 func (pm *PartitionManager) GetPartition(partitionID uint32) (*Partition, bool) {
 	pm.mu.RLock()

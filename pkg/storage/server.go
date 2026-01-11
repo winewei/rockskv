@@ -313,6 +313,15 @@ func (s *Server) Put(ctx context.Context, req *pb.StoragePutRequest) (*pb.Storag
 		}, nil
 	}
 
+	// Check if we are the primary for this partition
+	if !s.partitionManager.IsPrimary(req.PartitionId) {
+		common.StorageOperations.WithLabelValues("put", "not_primary").Inc()
+		return &pb.StoragePutResponse{
+			Success: false,
+			Error:   pb.ErrorCode_NOT_PRIMARY,
+		}, nil
+	}
+
 	if err := s.partitionManager.Put(req.Key, req.Value, req.PartitionId); err != nil {
 		s.logger.Error("Put failed",
 			zap.Error(err),
@@ -348,6 +357,15 @@ func (s *Server) Delete(ctx context.Context, req *pb.StorageDeleteRequest) (*pb.
 		return &pb.StorageDeleteResponse{
 			Success: false,
 			Error:   pb.ErrorCode_PARTITION_NOT_FOUND,
+		}, nil
+	}
+
+	// Check if we are the primary for this partition
+	if !s.partitionManager.IsPrimary(req.PartitionId) {
+		common.StorageOperations.WithLabelValues("delete", "not_primary").Inc()
+		return &pb.StorageDeleteResponse{
+			Success: false,
+			Error:   pb.ErrorCode_NOT_PRIMARY,
 		}, nil
 	}
 
@@ -435,6 +453,15 @@ func (s *Server) SetFields(ctx context.Context, req *pb.StorageSetFieldsRequest)
 		}, nil
 	}
 
+	// Check if we are the primary for this partition
+	if !s.partitionManager.IsPrimary(req.PartitionId) {
+		common.StorageOperations.WithLabelValues("set_fields", "not_primary").Inc()
+		return &pb.StorageSetFieldsResponse{
+			Success: false,
+			Error:   pb.ErrorCode_NOT_PRIMARY,
+		}, nil
+	}
+
 	// Build field batch
 	fb := &FieldBatch{
 		PartitionID: req.PartitionId,
@@ -486,6 +513,15 @@ func (s *Server) DeleteField(ctx context.Context, req *pb.StorageDeleteFieldRequ
 		return &pb.StorageDeleteFieldResponse{
 			Success: false,
 			Error:   pb.ErrorCode_PARTITION_NOT_FOUND,
+		}, nil
+	}
+
+	// Check if we are the primary for this partition
+	if !s.partitionManager.IsPrimary(req.PartitionId) {
+		common.StorageOperations.WithLabelValues("delete_field", "not_primary").Inc()
+		return &pb.StorageDeleteFieldResponse{
+			Success: false,
+			Error:   pb.ErrorCode_NOT_PRIMARY,
 		}, nil
 	}
 
@@ -578,6 +614,15 @@ func (s *Server) BatchPut(ctx context.Context, req *pb.StorageBatchPutRequest) (
 		return &pb.StorageBatchPutResponse{
 			Success: false,
 			Error:   pb.ErrorCode_PARTITION_NOT_FOUND,
+		}, nil
+	}
+
+	// Check if we are the primary for this partition
+	if !s.partitionManager.IsPrimary(req.PartitionId) {
+		common.StorageOperations.WithLabelValues("batch_put", "not_primary").Inc()
+		return &pb.StorageBatchPutResponse{
+			Success: false,
+			Error:   pb.ErrorCode_NOT_PRIMARY,
 		}, nil
 	}
 

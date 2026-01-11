@@ -29,6 +29,7 @@ const (
 	ErrorCode_PARTITION_MOVED     ErrorCode = 2
 	ErrorCode_KEY_NOT_FOUND       ErrorCode = 3
 	ErrorCode_INTERNAL_ERROR      ErrorCode = 4
+	ErrorCode_NOT_PRIMARY         ErrorCode = 5
 )
 
 // Enum value maps for ErrorCode.
@@ -39,6 +40,7 @@ var (
 		2: "PARTITION_MOVED",
 		3: "KEY_NOT_FOUND",
 		4: "INTERNAL_ERROR",
+		5: "NOT_PRIMARY",
 	}
 	ErrorCode_value = map[string]int32{
 		"OK":                  0,
@@ -46,6 +48,7 @@ var (
 		"PARTITION_MOVED":     2,
 		"KEY_NOT_FOUND":       3,
 		"INTERNAL_ERROR":      4,
+		"NOT_PRIMARY":         5,
 	}
 )
 

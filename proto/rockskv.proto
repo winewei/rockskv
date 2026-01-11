@@ -303,6 +303,7 @@ enum ErrorCode {
   PARTITION_MOVED = 2;
   KEY_NOT_FOUND = 3;
   INTERNAL_ERROR = 4;
+  NOT_PRIMARY = 5;  // Write rejected because node is not primary for this partition
 }
 
 // ========== MetadataService 消息定义 ==========
