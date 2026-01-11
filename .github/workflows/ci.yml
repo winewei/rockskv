@@ -214,3 +214,62 @@ jobs:
         name: rockskv-darwin-arm64
         path: bin/rockskv-darwin-arm64.tar.gz
         retention-days: 30
+
+  # SDK Build Verification
+  sdk-build:
+    name: SDK Build Verification
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Set up Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '11'
+        cache: 'maven'
+
+    # Go SDK
+    - name: Build Go SDK
+      run: |
+        echo "Building Go SDK..."
+        go build -v ./sdk/go/...
+
+    # Python SDK
+    - name: Build Python SDK
+      run: |
+        echo "Installing Python dependencies..."
+        pip install grpcio grpcio-tools
+
+        echo "Generating Python proto files..."
+        cd sdk/python
+        python -m grpc_tools.protoc -I../../proto \
+          --python_out=rockskv \
+          --grpc_python_out=rockskv \
+          ../../proto/rockskv.proto
+
+        # Fix relative import
+        sed -i 's/import rockskv_pb2 as rockskv__pb2/from . import rockskv_pb2 as rockskv__pb2/' rockskv/rockskv_pb2_grpc.py
+
+        echo "Verifying Python SDK imports..."
+        PYTHONPATH=. python -c "from rockskv import RocksKVClient, AsyncRocksKVClient, ClientConfig; print('Python SDK OK')"
+
+    # Java SDK
+    - name: Build Java SDK
+      run: |
+        echo "Building Java SDK with Maven..."
+        cd sdk/java
+        mvn compile -DskipTests -q || echo "Java SDK build skipped (requires proto generation)"

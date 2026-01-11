@@ -128,6 +128,38 @@ jobs:
         chmod +x ./scripts/smoke-test.sh
         ./scripts/smoke-test.sh
 
+    # SDK Integration Tests
+    - name: Test Go SDK
+      run: |
+        echo "Running Go SDK example..."
+        go run ./sdk/go/examples/basic/main.go
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Test Python SDK
+      run: |
+        echo "Installing Python dependencies..."
+        pip install grpcio grpcio-tools
+
+        echo "Generating Python proto files..."
+        cd sdk/python
+        python -m grpc_tools.protoc -I../../proto \
+          --python_out=rockskv \
+          --grpc_python_out=rockskv \
+          ../../proto/rockskv.proto
+
+        # Fix relative import in generated file
+        sed -i 's/import rockskv_pb2 as rockskv__pb2/from . import rockskv_pb2 as rockskv__pb2/' rockskv/rockskv_pb2_grpc.py
+
+        echo "Running Python SDK example..."
+        PYTHONPATH=. python examples/basic_usage.py
+
+        echo "Running Python async SDK example..."
+        PYTHONPATH=. python examples/async_usage.py
+
     - name: Stop Services
       if: always()
       run: |
