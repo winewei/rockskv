@@ -373,84 +373,193 @@ func (s *Server) Delete(ctx context.Context, req *pb.StorageDeleteRequest) (*pb.
 	}, nil
 }
 
-// Patch implements StorageService.Patch - sparse update (partial modification)
-func (s *Server) Patch(ctx context.Context, req *pb.StoragePatchRequest) (*pb.StoragePatchResponse, error) {
+// GetField implements StorageService.GetField - retrieves a single field
+func (s *Server) GetField(ctx context.Context, req *pb.StorageGetFieldRequest) (*pb.StorageGetFieldResponse, error) {
 	start := time.Now()
 	defer func() {
-		common.StorageLatency.WithLabelValues("patch").Observe(time.Since(start).Seconds())
+		common.StorageLatency.WithLabelValues("get_field").Observe(time.Since(start).Seconds())
 	}()
 
 	// Check if we have the partition
 	if !s.partitionManager.HasPartition(req.PartitionId) {
-		common.StorageOperations.WithLabelValues("patch", "partition_not_found").Inc()
-		return &pb.StoragePatchResponse{
+		common.StorageOperations.WithLabelValues("get_field", "partition_not_found").Inc()
+		return &pb.StorageGetFieldResponse{
+			Found: false,
+			Error: pb.ErrorCode_PARTITION_NOT_FOUND,
+		}, nil
+	}
+
+	fs := NewFieldStorage(s.db)
+	value, found, err := fs.GetField(req.PrimaryKey, req.FieldName)
+	if err != nil {
+		s.logger.Error("GetField failed",
+			zap.Error(err),
+			zap.Uint32("partition_id", req.PartitionId),
+		)
+		common.StorageOperations.WithLabelValues("get_field", "error").Inc()
+		return &pb.StorageGetFieldResponse{
+			Found: false,
+			Error: pb.ErrorCode_INTERNAL_ERROR,
+		}, nil
+	}
+
+	if !found {
+		common.StorageOperations.WithLabelValues("get_field", "not_found").Inc()
+		return &pb.StorageGetFieldResponse{
+			Found: false,
+			Error: pb.ErrorCode_OK,
+		}, nil
+	}
+
+	common.StorageOperations.WithLabelValues("get_field", "success").Inc()
+	return &pb.StorageGetFieldResponse{
+		Value: value,
+		Found: true,
+		Error: pb.ErrorCode_OK,
+	}, nil
+}
+
+// SetFields implements StorageService.SetFields - sets multiple fields atomically
+func (s *Server) SetFields(ctx context.Context, req *pb.StorageSetFieldsRequest) (*pb.StorageSetFieldsResponse, error) {
+	start := time.Now()
+	defer func() {
+		common.StorageLatency.WithLabelValues("set_fields").Observe(time.Since(start).Seconds())
+	}()
+
+	// Check if we have the partition
+	if !s.partitionManager.HasPartition(req.PartitionId) {
+		common.StorageOperations.WithLabelValues("set_fields", "partition_not_found").Inc()
+		return &pb.StorageSetFieldsResponse{
 			Success: false,
 			Error:   pb.ErrorCode_PARTITION_NOT_FOUND,
 		}, nil
 	}
 
-	// Get current value
-	currentValue, _, err := s.partitionManager.Get(req.Key, req.PartitionId)
+	// Build field batch
+	fb := &FieldBatch{
+		PrimaryKey: req.PrimaryKey,
+		Updates:    make([]FieldUpdate, 0, len(req.Fields)),
+	}
+	for _, field := range req.Fields {
+		fb.Updates = append(fb.Updates, FieldUpdate{
+			FieldName: field.FieldName,
+			Value:     field.Value,
+			IsDelete:  field.IsDelete,
+		})
+	}
+
+	// Apply field batch
+	fs := NewFieldStorage(s.db)
+	if err := fs.ApplyFieldBatch(fb); err != nil {
+		s.logger.Error("SetFields failed",
+			zap.Error(err),
+			zap.Uint32("partition_id", req.PartitionId),
+		)
+		common.StorageOperations.WithLabelValues("set_fields", "error").Inc()
+		return &pb.StorageSetFieldsResponse{
+			Success: false,
+			Error:   pb.ErrorCode_INTERNAL_ERROR,
+		}, nil
+	}
+
+	// Enqueue for async replication
+	s.enqueueFieldBatchReplication(req.PartitionId, fb.Encode())
+
+	common.StorageOperations.WithLabelValues("set_fields", "success").Inc()
+	return &pb.StorageSetFieldsResponse{
+		Success: true,
+		Error:   pb.ErrorCode_OK,
+	}, nil
+}
+
+// DeleteField implements StorageService.DeleteField - deletes a single field
+func (s *Server) DeleteField(ctx context.Context, req *pb.StorageDeleteFieldRequest) (*pb.StorageDeleteFieldResponse, error) {
+	start := time.Now()
+	defer func() {
+		common.StorageLatency.WithLabelValues("delete_field").Observe(time.Since(start).Seconds())
+	}()
+
+	// Check if we have the partition
+	if !s.partitionManager.HasPartition(req.PartitionId) {
+		common.StorageOperations.WithLabelValues("delete_field", "partition_not_found").Inc()
+		return &pb.StorageDeleteFieldResponse{
+			Success: false,
+			Error:   pb.ErrorCode_PARTITION_NOT_FOUND,
+		}, nil
+	}
+
+	fs := NewFieldStorage(s.db)
+	if err := fs.DeleteField(req.PrimaryKey, req.FieldName); err != nil {
+		s.logger.Error("DeleteField failed",
+			zap.Error(err),
+			zap.Uint32("partition_id", req.PartitionId),
+		)
+		common.StorageOperations.WithLabelValues("delete_field", "error").Inc()
+		return &pb.StorageDeleteFieldResponse{
+			Success: false,
+			Error:   pb.ErrorCode_INTERNAL_ERROR,
+		}, nil
+	}
+
+	// Enqueue for async replication
+	fb := &FieldBatch{
+		PrimaryKey: req.PrimaryKey,
+		Updates: []FieldUpdate{
+			{FieldName: req.FieldName, IsDelete: true},
+		},
+	}
+	s.enqueueFieldBatchReplication(req.PartitionId, fb.Encode())
+
+	common.StorageOperations.WithLabelValues("delete_field", "success").Inc()
+	return &pb.StorageDeleteFieldResponse{
+		Success: true,
+		Error:   pb.ErrorCode_OK,
+	}, nil
+}
+
+// GetAllFields implements StorageService.GetAllFields - retrieves all fields for a document
+func (s *Server) GetAllFields(ctx context.Context, req *pb.StorageGetAllFieldsRequest) (*pb.StorageGetAllFieldsResponse, error) {
+	start := time.Now()
+	defer func() {
+		common.StorageLatency.WithLabelValues("get_all_fields").Observe(time.Since(start).Seconds())
+	}()
+
+	// Check if we have the partition
+	if !s.partitionManager.HasPartition(req.PartitionId) {
+		common.StorageOperations.WithLabelValues("get_all_fields", "partition_not_found").Inc()
+		return &pb.StorageGetAllFieldsResponse{
+			Found: false,
+			Error: pb.ErrorCode_PARTITION_NOT_FOUND,
+		}, nil
+	}
+
+	fs := NewFieldStorage(s.db)
+	fields, err := fs.GetAllFields(req.PrimaryKey)
 	if err != nil {
-		s.logger.Error("Patch get failed",
+		s.logger.Error("GetAllFields failed",
 			zap.Error(err),
 			zap.Uint32("partition_id", req.PartitionId),
 		)
-		common.StorageOperations.WithLabelValues("patch", "error").Inc()
-		return &pb.StoragePatchResponse{
-			Success: false,
-			Error:   pb.ErrorCode_INTERNAL_ERROR,
+		common.StorageOperations.WithLabelValues("get_all_fields", "error").Inc()
+		return &pb.StorageGetAllFieldsResponse{
+			Found: false,
+			Error: pb.ErrorCode_INTERNAL_ERROR,
 		}, nil
 	}
 
-	// Decode and apply patch
-	patch, err := DecodePatch(req.PatchData)
-	if err != nil {
-		s.logger.Error("Patch decode failed",
-			zap.Error(err),
-			zap.Uint32("partition_id", req.PartitionId),
-		)
-		common.StorageOperations.WithLabelValues("patch", "error").Inc()
-		return &pb.StoragePatchResponse{
-			Success: false,
-			Error:   pb.ErrorCode_INTERNAL_ERROR,
+	if len(fields) == 0 {
+		common.StorageOperations.WithLabelValues("get_all_fields", "not_found").Inc()
+		return &pb.StorageGetAllFieldsResponse{
+			Found: false,
+			Error: pb.ErrorCode_OK,
 		}, nil
 	}
 
-	newValue, err := patch.Apply(currentValue)
-	if err != nil {
-		s.logger.Error("Patch apply failed",
-			zap.Error(err),
-			zap.Uint32("partition_id", req.PartitionId),
-		)
-		common.StorageOperations.WithLabelValues("patch", "error").Inc()
-		return &pb.StoragePatchResponse{
-			Success: false,
-			Error:   pb.ErrorCode_INTERNAL_ERROR,
-		}, nil
-	}
-
-	// Write new value
-	if err := s.partitionManager.Put(req.Key, newValue, req.PartitionId); err != nil {
-		s.logger.Error("Patch put failed",
-			zap.Error(err),
-			zap.Uint32("partition_id", req.PartitionId),
-		)
-		common.StorageOperations.WithLabelValues("patch", "error").Inc()
-		return &pb.StoragePatchResponse{
-			Success: false,
-			Error:   pb.ErrorCode_INTERNAL_ERROR,
-		}, nil
-	}
-
-	// Enqueue patch for async replication (if Primary)
-	s.enqueuePatchReplication(req.PartitionId, req.Key, req.PatchData)
-
-	common.StorageOperations.WithLabelValues("patch", "success").Inc()
-	return &pb.StoragePatchResponse{
-		Success:  true,
-		NewValue: newValue,
-		Error:    pb.ErrorCode_OK,
+	common.StorageOperations.WithLabelValues("get_all_fields", "success").Inc()
+	return &pb.StorageGetAllFieldsResponse{
+		Fields: fields,
+		Found:  true,
+		Error:  pb.ErrorCode_OK,
 	}, nil
 }
 
@@ -1069,8 +1178,8 @@ func (s *Server) enqueueReplication(partitionID uint32, key, value []byte, isDel
 	}
 }
 
-// enqueuePatchReplication adds a patch entry to the replication queue
-func (s *Server) enqueuePatchReplication(partitionID uint32, key, patchData []byte) {
+// enqueueFieldBatchReplication adds a field batch to the replication queue
+func (s *Server) enqueueFieldBatchReplication(partitionID uint32, batchData []byte) {
 	s.replicatorsMu.RLock()
 	replicator, exists := s.replicators[partitionID]
 	s.replicatorsMu.RUnlock()
@@ -1079,8 +1188,8 @@ func (s *Server) enqueuePatchReplication(partitionID uint32, key, patchData []by
 		return
 	}
 
-	if _, err := replicator.AppendPatch(key, patchData); err != nil {
-		s.logger.Warn("Failed to append patch to command log",
+	if _, err := replicator.AppendFieldBatch(batchData); err != nil {
+		s.logger.Warn("Failed to append field batch to command log",
 			zap.Uint32("partition_id", partitionID),
 			zap.Error(err),
 		)
@@ -1107,24 +1216,15 @@ func (s *Server) Replicate(ctx context.Context, req *pb.ReplicateRequest) (*pb.R
 		case pb.ReplicationOpType_REP_OP_DELETE:
 			err = s.partitionManager.Delete(entry.Key, req.PartitionId)
 
-		case pb.ReplicationOpType_REP_OP_PATCH:
-			// Apply patch operation
-			currentValue, _, getErr := s.partitionManager.Get(entry.Key, req.PartitionId)
-			if getErr != nil {
-				err = getErr
-				break
-			}
-			patch, decodeErr := DecodePatch(entry.Value)
+		case pb.ReplicationOpType_REP_OP_FIELD_BATCH:
+			// Apply field batch operation
+			fb, decodeErr := DecodeFieldBatch(entry.Value)
 			if decodeErr != nil {
 				err = decodeErr
 				break
 			}
-			newValue, applyErr := patch.Apply(currentValue)
-			if applyErr != nil {
-				err = applyErr
-				break
-			}
-			err = s.partitionManager.Put(entry.Key, newValue, req.PartitionId)
+			fs := NewFieldStorage(s.db)
+			err = fs.ApplyFieldBatch(fb)
 
 		case pb.ReplicationOpType_REP_OP_PUT:
 			err = s.partitionManager.Put(entry.Key, entry.Value, req.PartitionId)

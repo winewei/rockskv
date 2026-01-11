@@ -19,12 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	KVService_Get_FullMethodName      = "/rockskv.KVService/Get"
-	KVService_Put_FullMethodName      = "/rockskv.KVService/Put"
-	KVService_Delete_FullMethodName   = "/rockskv.KVService/Delete"
-	KVService_Patch_FullMethodName    = "/rockskv.KVService/Patch"
-	KVService_BatchGet_FullMethodName = "/rockskv.KVService/BatchGet"
-	KVService_BatchPut_FullMethodName = "/rockskv.KVService/BatchPut"
+	KVService_Get_FullMethodName          = "/rockskv.KVService/Get"
+	KVService_Put_FullMethodName          = "/rockskv.KVService/Put"
+	KVService_Delete_FullMethodName       = "/rockskv.KVService/Delete"
+	KVService_BatchGet_FullMethodName     = "/rockskv.KVService/BatchGet"
+	KVService_BatchPut_FullMethodName     = "/rockskv.KVService/BatchPut"
+	KVService_GetField_FullMethodName     = "/rockskv.KVService/GetField"
+	KVService_SetField_FullMethodName     = "/rockskv.KVService/SetField"
+	KVService_SetFields_FullMethodName    = "/rockskv.KVService/SetFields"
+	KVService_DeleteField_FullMethodName  = "/rockskv.KVService/DeleteField"
+	KVService_GetAllFields_FullMethodName = "/rockskv.KVService/GetAllFields"
 )
 
 // KVServiceClient is the client API for KVService service.
@@ -36,9 +40,14 @@ type KVServiceClient interface {
 	Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error)
 	Put(ctx context.Context, in *PutRequest, opts ...grpc.CallOption) (*PutResponse, error)
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error)
-	Patch(ctx context.Context, in *PatchRequest, opts ...grpc.CallOption) (*PatchResponse, error)
 	BatchGet(ctx context.Context, in *BatchGetRequest, opts ...grpc.CallOption) (*BatchGetResponse, error)
 	BatchPut(ctx context.Context, in *BatchPutRequest, opts ...grpc.CallOption) (*BatchPutResponse, error)
+	// Field-level operations
+	GetField(ctx context.Context, in *GetFieldRequest, opts ...grpc.CallOption) (*GetFieldResponse, error)
+	SetField(ctx context.Context, in *SetFieldRequest, opts ...grpc.CallOption) (*SetFieldResponse, error)
+	SetFields(ctx context.Context, in *SetFieldsRequest, opts ...grpc.CallOption) (*SetFieldsResponse, error)
+	DeleteField(ctx context.Context, in *DeleteFieldRequest, opts ...grpc.CallOption) (*DeleteFieldResponse, error)
+	GetAllFields(ctx context.Context, in *GetAllFieldsRequest, opts ...grpc.CallOption) (*GetAllFieldsResponse, error)
 }
 
 type kVServiceClient struct {
@@ -79,16 +88,6 @@ func (c *kVServiceClient) Delete(ctx context.Context, in *DeleteRequest, opts ..
 	return out, nil
 }
 
-func (c *kVServiceClient) Patch(ctx context.Context, in *PatchRequest, opts ...grpc.CallOption) (*PatchResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(PatchResponse)
-	err := c.cc.Invoke(ctx, KVService_Patch_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *kVServiceClient) BatchGet(ctx context.Context, in *BatchGetRequest, opts ...grpc.CallOption) (*BatchGetResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(BatchGetResponse)
@@ -109,6 +108,56 @@ func (c *kVServiceClient) BatchPut(ctx context.Context, in *BatchPutRequest, opt
 	return out, nil
 }
 
+func (c *kVServiceClient) GetField(ctx context.Context, in *GetFieldRequest, opts ...grpc.CallOption) (*GetFieldResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetFieldResponse)
+	err := c.cc.Invoke(ctx, KVService_GetField_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kVServiceClient) SetField(ctx context.Context, in *SetFieldRequest, opts ...grpc.CallOption) (*SetFieldResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetFieldResponse)
+	err := c.cc.Invoke(ctx, KVService_SetField_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kVServiceClient) SetFields(ctx context.Context, in *SetFieldsRequest, opts ...grpc.CallOption) (*SetFieldsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetFieldsResponse)
+	err := c.cc.Invoke(ctx, KVService_SetFields_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kVServiceClient) DeleteField(ctx context.Context, in *DeleteFieldRequest, opts ...grpc.CallOption) (*DeleteFieldResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteFieldResponse)
+	err := c.cc.Invoke(ctx, KVService_DeleteField_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kVServiceClient) GetAllFields(ctx context.Context, in *GetAllFieldsRequest, opts ...grpc.CallOption) (*GetAllFieldsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAllFieldsResponse)
+	err := c.cc.Invoke(ctx, KVService_GetAllFields_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // KVServiceServer is the server API for KVService service.
 // All implementations must embed UnimplementedKVServiceServer
 // for forward compatibility.
@@ -118,9 +167,14 @@ type KVServiceServer interface {
 	Get(context.Context, *GetRequest) (*GetResponse, error)
 	Put(context.Context, *PutRequest) (*PutResponse, error)
 	Delete(context.Context, *DeleteRequest) (*DeleteResponse, error)
-	Patch(context.Context, *PatchRequest) (*PatchResponse, error)
 	BatchGet(context.Context, *BatchGetRequest) (*BatchGetResponse, error)
 	BatchPut(context.Context, *BatchPutRequest) (*BatchPutResponse, error)
+	// Field-level operations
+	GetField(context.Context, *GetFieldRequest) (*GetFieldResponse, error)
+	SetField(context.Context, *SetFieldRequest) (*SetFieldResponse, error)
+	SetFields(context.Context, *SetFieldsRequest) (*SetFieldsResponse, error)
+	DeleteField(context.Context, *DeleteFieldRequest) (*DeleteFieldResponse, error)
+	GetAllFields(context.Context, *GetAllFieldsRequest) (*GetAllFieldsResponse, error)
 	mustEmbedUnimplementedKVServiceServer()
 }
 
@@ -140,14 +194,26 @@ func (UnimplementedKVServiceServer) Put(context.Context, *PutRequest) (*PutRespo
 func (UnimplementedKVServiceServer) Delete(context.Context, *DeleteRequest) (*DeleteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Delete not implemented")
 }
-func (UnimplementedKVServiceServer) Patch(context.Context, *PatchRequest) (*PatchResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Patch not implemented")
-}
 func (UnimplementedKVServiceServer) BatchGet(context.Context, *BatchGetRequest) (*BatchGetResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method BatchGet not implemented")
 }
 func (UnimplementedKVServiceServer) BatchPut(context.Context, *BatchPutRequest) (*BatchPutResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method BatchPut not implemented")
+}
+func (UnimplementedKVServiceServer) GetField(context.Context, *GetFieldRequest) (*GetFieldResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetField not implemented")
+}
+func (UnimplementedKVServiceServer) SetField(context.Context, *SetFieldRequest) (*SetFieldResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetField not implemented")
+}
+func (UnimplementedKVServiceServer) SetFields(context.Context, *SetFieldsRequest) (*SetFieldsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetFields not implemented")
+}
+func (UnimplementedKVServiceServer) DeleteField(context.Context, *DeleteFieldRequest) (*DeleteFieldResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteField not implemented")
+}
+func (UnimplementedKVServiceServer) GetAllFields(context.Context, *GetAllFieldsRequest) (*GetAllFieldsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAllFields not implemented")
 }
 func (UnimplementedKVServiceServer) mustEmbedUnimplementedKVServiceServer() {}
 func (UnimplementedKVServiceServer) testEmbeddedByValue()                   {}
@@ -224,24 +290,6 @@ func _KVService_Delete_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
-func _KVService_Patch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PatchRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(KVServiceServer).Patch(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: KVService_Patch_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(KVServiceServer).Patch(ctx, req.(*PatchRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _KVService_BatchGet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(BatchGetRequest)
 	if err := dec(in); err != nil {
@@ -278,6 +326,96 @@ func _KVService_BatchPut_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KVService_GetField_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetFieldRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServiceServer).GetField(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KVService_GetField_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServiceServer).GetField(ctx, req.(*GetFieldRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KVService_SetField_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetFieldRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServiceServer).SetField(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KVService_SetField_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServiceServer).SetField(ctx, req.(*SetFieldRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KVService_SetFields_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetFieldsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServiceServer).SetFields(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KVService_SetFields_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServiceServer).SetFields(ctx, req.(*SetFieldsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KVService_DeleteField_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteFieldRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServiceServer).DeleteField(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KVService_DeleteField_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServiceServer).DeleteField(ctx, req.(*DeleteFieldRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KVService_GetAllFields_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAllFieldsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServiceServer).GetAllFields(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KVService_GetAllFields_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServiceServer).GetAllFields(ctx, req.(*GetAllFieldsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // KVService_ServiceDesc is the grpc.ServiceDesc for KVService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -298,16 +436,32 @@ var KVService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _KVService_Delete_Handler,
 		},
 		{
-			MethodName: "Patch",
-			Handler:    _KVService_Patch_Handler,
-		},
-		{
 			MethodName: "BatchGet",
 			Handler:    _KVService_BatchGet_Handler,
 		},
 		{
 			MethodName: "BatchPut",
 			Handler:    _KVService_BatchPut_Handler,
+		},
+		{
+			MethodName: "GetField",
+			Handler:    _KVService_GetField_Handler,
+		},
+		{
+			MethodName: "SetField",
+			Handler:    _KVService_SetField_Handler,
+		},
+		{
+			MethodName: "SetFields",
+			Handler:    _KVService_SetFields_Handler,
+		},
+		{
+			MethodName: "DeleteField",
+			Handler:    _KVService_DeleteField_Handler,
+		},
+		{
+			MethodName: "GetAllFields",
+			Handler:    _KVService_GetAllFields_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
@@ -318,10 +472,13 @@ const (
 	StorageService_Get_FullMethodName                  = "/rockskv.StorageService/Get"
 	StorageService_Put_FullMethodName                  = "/rockskv.StorageService/Put"
 	StorageService_Delete_FullMethodName               = "/rockskv.StorageService/Delete"
-	StorageService_Patch_FullMethodName                = "/rockskv.StorageService/Patch"
 	StorageService_BatchPut_FullMethodName             = "/rockskv.StorageService/BatchPut"
 	StorageService_ExportSST_FullMethodName            = "/rockskv.StorageService/ExportSST"
 	StorageService_IngestSST_FullMethodName            = "/rockskv.StorageService/IngestSST"
+	StorageService_GetField_FullMethodName             = "/rockskv.StorageService/GetField"
+	StorageService_SetFields_FullMethodName            = "/rockskv.StorageService/SetFields"
+	StorageService_DeleteField_FullMethodName          = "/rockskv.StorageService/DeleteField"
+	StorageService_GetAllFields_FullMethodName         = "/rockskv.StorageService/GetAllFields"
 	StorageService_Replicate_FullMethodName            = "/rockskv.StorageService/Replicate"
 	StorageService_GetReplicationStatus_FullMethodName = "/rockskv.StorageService/GetReplicationStatus"
 )
@@ -335,10 +492,14 @@ type StorageServiceClient interface {
 	Get(ctx context.Context, in *StorageGetRequest, opts ...grpc.CallOption) (*StorageGetResponse, error)
 	Put(ctx context.Context, in *StoragePutRequest, opts ...grpc.CallOption) (*StoragePutResponse, error)
 	Delete(ctx context.Context, in *StorageDeleteRequest, opts ...grpc.CallOption) (*StorageDeleteResponse, error)
-	Patch(ctx context.Context, in *StoragePatchRequest, opts ...grpc.CallOption) (*StoragePatchResponse, error)
 	BatchPut(ctx context.Context, in *StorageBatchPutRequest, opts ...grpc.CallOption) (*StorageBatchPutResponse, error)
 	ExportSST(ctx context.Context, in *ExportSSTRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SSTChunk], error)
 	IngestSST(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[SSTChunk, IngestSSTResponse], error)
+	// Field-level operations
+	GetField(ctx context.Context, in *StorageGetFieldRequest, opts ...grpc.CallOption) (*StorageGetFieldResponse, error)
+	SetFields(ctx context.Context, in *StorageSetFieldsRequest, opts ...grpc.CallOption) (*StorageSetFieldsResponse, error)
+	DeleteField(ctx context.Context, in *StorageDeleteFieldRequest, opts ...grpc.CallOption) (*StorageDeleteFieldResponse, error)
+	GetAllFields(ctx context.Context, in *StorageGetAllFieldsRequest, opts ...grpc.CallOption) (*StorageGetAllFieldsResponse, error)
 	// Replication APIs (Primary -> Replica)
 	Replicate(ctx context.Context, in *ReplicateRequest, opts ...grpc.CallOption) (*ReplicateResponse, error)
 	GetReplicationStatus(ctx context.Context, in *GetReplicationStatusRequest, opts ...grpc.CallOption) (*GetReplicationStatusResponse, error)
@@ -376,16 +537,6 @@ func (c *storageServiceClient) Delete(ctx context.Context, in *StorageDeleteRequ
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StorageDeleteResponse)
 	err := c.cc.Invoke(ctx, StorageService_Delete_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *storageServiceClient) Patch(ctx context.Context, in *StoragePatchRequest, opts ...grpc.CallOption) (*StoragePatchResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StoragePatchResponse)
-	err := c.cc.Invoke(ctx, StorageService_Patch_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -434,6 +585,46 @@ func (c *storageServiceClient) IngestSST(ctx context.Context, opts ...grpc.CallO
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type StorageService_IngestSSTClient = grpc.ClientStreamingClient[SSTChunk, IngestSSTResponse]
 
+func (c *storageServiceClient) GetField(ctx context.Context, in *StorageGetFieldRequest, opts ...grpc.CallOption) (*StorageGetFieldResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StorageGetFieldResponse)
+	err := c.cc.Invoke(ctx, StorageService_GetField_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *storageServiceClient) SetFields(ctx context.Context, in *StorageSetFieldsRequest, opts ...grpc.CallOption) (*StorageSetFieldsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StorageSetFieldsResponse)
+	err := c.cc.Invoke(ctx, StorageService_SetFields_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *storageServiceClient) DeleteField(ctx context.Context, in *StorageDeleteFieldRequest, opts ...grpc.CallOption) (*StorageDeleteFieldResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StorageDeleteFieldResponse)
+	err := c.cc.Invoke(ctx, StorageService_DeleteField_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *storageServiceClient) GetAllFields(ctx context.Context, in *StorageGetAllFieldsRequest, opts ...grpc.CallOption) (*StorageGetAllFieldsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StorageGetAllFieldsResponse)
+	err := c.cc.Invoke(ctx, StorageService_GetAllFields_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *storageServiceClient) Replicate(ctx context.Context, in *ReplicateRequest, opts ...grpc.CallOption) (*ReplicateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ReplicateResponse)
@@ -463,10 +654,14 @@ type StorageServiceServer interface {
 	Get(context.Context, *StorageGetRequest) (*StorageGetResponse, error)
 	Put(context.Context, *StoragePutRequest) (*StoragePutResponse, error)
 	Delete(context.Context, *StorageDeleteRequest) (*StorageDeleteResponse, error)
-	Patch(context.Context, *StoragePatchRequest) (*StoragePatchResponse, error)
 	BatchPut(context.Context, *StorageBatchPutRequest) (*StorageBatchPutResponse, error)
 	ExportSST(*ExportSSTRequest, grpc.ServerStreamingServer[SSTChunk]) error
 	IngestSST(grpc.ClientStreamingServer[SSTChunk, IngestSSTResponse]) error
+	// Field-level operations
+	GetField(context.Context, *StorageGetFieldRequest) (*StorageGetFieldResponse, error)
+	SetFields(context.Context, *StorageSetFieldsRequest) (*StorageSetFieldsResponse, error)
+	DeleteField(context.Context, *StorageDeleteFieldRequest) (*StorageDeleteFieldResponse, error)
+	GetAllFields(context.Context, *StorageGetAllFieldsRequest) (*StorageGetAllFieldsResponse, error)
 	// Replication APIs (Primary -> Replica)
 	Replicate(context.Context, *ReplicateRequest) (*ReplicateResponse, error)
 	GetReplicationStatus(context.Context, *GetReplicationStatusRequest) (*GetReplicationStatusResponse, error)
@@ -489,9 +684,6 @@ func (UnimplementedStorageServiceServer) Put(context.Context, *StoragePutRequest
 func (UnimplementedStorageServiceServer) Delete(context.Context, *StorageDeleteRequest) (*StorageDeleteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Delete not implemented")
 }
-func (UnimplementedStorageServiceServer) Patch(context.Context, *StoragePatchRequest) (*StoragePatchResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Patch not implemented")
-}
 func (UnimplementedStorageServiceServer) BatchPut(context.Context, *StorageBatchPutRequest) (*StorageBatchPutResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method BatchPut not implemented")
 }
@@ -500,6 +692,18 @@ func (UnimplementedStorageServiceServer) ExportSST(*ExportSSTRequest, grpc.Serve
 }
 func (UnimplementedStorageServiceServer) IngestSST(grpc.ClientStreamingServer[SSTChunk, IngestSSTResponse]) error {
 	return status.Error(codes.Unimplemented, "method IngestSST not implemented")
+}
+func (UnimplementedStorageServiceServer) GetField(context.Context, *StorageGetFieldRequest) (*StorageGetFieldResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetField not implemented")
+}
+func (UnimplementedStorageServiceServer) SetFields(context.Context, *StorageSetFieldsRequest) (*StorageSetFieldsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetFields not implemented")
+}
+func (UnimplementedStorageServiceServer) DeleteField(context.Context, *StorageDeleteFieldRequest) (*StorageDeleteFieldResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteField not implemented")
+}
+func (UnimplementedStorageServiceServer) GetAllFields(context.Context, *StorageGetAllFieldsRequest) (*StorageGetAllFieldsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAllFields not implemented")
 }
 func (UnimplementedStorageServiceServer) Replicate(context.Context, *ReplicateRequest) (*ReplicateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Replicate not implemented")
@@ -582,24 +786,6 @@ func _StorageService_Delete_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
-func _StorageService_Patch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StoragePatchRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(StorageServiceServer).Patch(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: StorageService_Patch_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(StorageServiceServer).Patch(ctx, req.(*StoragePatchRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _StorageService_BatchPut_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(StorageBatchPutRequest)
 	if err := dec(in); err != nil {
@@ -635,6 +821,78 @@ func _StorageService_IngestSST_Handler(srv interface{}, stream grpc.ServerStream
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type StorageService_IngestSSTServer = grpc.ClientStreamingServer[SSTChunk, IngestSSTResponse]
+
+func _StorageService_GetField_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StorageGetFieldRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StorageServiceServer).GetField(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StorageService_GetField_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StorageServiceServer).GetField(ctx, req.(*StorageGetFieldRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StorageService_SetFields_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StorageSetFieldsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StorageServiceServer).SetFields(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StorageService_SetFields_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StorageServiceServer).SetFields(ctx, req.(*StorageSetFieldsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StorageService_DeleteField_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StorageDeleteFieldRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StorageServiceServer).DeleteField(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StorageService_DeleteField_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StorageServiceServer).DeleteField(ctx, req.(*StorageDeleteFieldRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StorageService_GetAllFields_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StorageGetAllFieldsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StorageServiceServer).GetAllFields(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StorageService_GetAllFields_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StorageServiceServer).GetAllFields(ctx, req.(*StorageGetAllFieldsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
 
 func _StorageService_Replicate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ReplicateRequest)
@@ -692,12 +950,24 @@ var StorageService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _StorageService_Delete_Handler,
 		},
 		{
-			MethodName: "Patch",
-			Handler:    _StorageService_Patch_Handler,
-		},
-		{
 			MethodName: "BatchPut",
 			Handler:    _StorageService_BatchPut_Handler,
+		},
+		{
+			MethodName: "GetField",
+			Handler:    _StorageService_GetField_Handler,
+		},
+		{
+			MethodName: "SetFields",
+			Handler:    _StorageService_SetFields_Handler,
+		},
+		{
+			MethodName: "DeleteField",
+			Handler:    _StorageService_DeleteField_Handler,
+		},
+		{
+			MethodName: "GetAllFields",
+			Handler:    _StorageService_GetAllFields_Handler,
 		},
 		{
 			MethodName: "Replicate",

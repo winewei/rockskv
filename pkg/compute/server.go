@@ -14,7 +14,6 @@ import (
 
 	"github.com/winewei/rockskv/pkg/common"
 	pb "github.com/winewei/rockskv/pkg/proto"
-	"github.com/winewei/rockskv/pkg/storage"
 )
 
 const (
@@ -319,68 +318,41 @@ func (s *Server) doDelete(ctx context.Context, nodeID string, key []byte, partit
 	return nil
 }
 
-// Patch implements KVService.Patch - sparse update (partial modification)
-func (s *Server) Patch(ctx context.Context, req *pb.PatchRequest) (*pb.PatchResponse, error) {
+// GetField implements KVService.GetField - retrieves a single field
+func (s *Server) GetField(ctx context.Context, req *pb.GetFieldRequest) (*pb.GetFieldResponse, error) {
 	start := time.Now()
 	defer func() {
-		common.StorageLatency.WithLabelValues("client_patch").Observe(time.Since(start).Seconds())
+		common.StorageLatency.WithLabelValues("client_get_field").Observe(time.Since(start).Seconds())
 	}()
 
 	// Get partition nodes
-	primary, _, partitionID, err := s.router.GetPartitionNodes(req.Key)
+	primary, replica, partitionID, err := s.router.GetPartitionNodes(req.PrimaryKey)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
 	}
 
-	// Convert protobuf operations to internal patch format
-	patchData, err := s.convertPatchOperations(req.Operations)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid patch operations: %v", err)
+	// Try primary first
+	resp, err := s.doGetField(ctx, primary, req.PrimaryKey, req.FieldName, partitionID)
+	if err == nil {
+		return resp, nil
 	}
 
-	// Patch only Primary - Replica will sync via WAL replication
-	newValue, err := s.doPatch(ctx, primary, req.Key, patchData, partitionID)
+	s.logger.Warn("Primary get_field failed, trying replica",
+		zap.String("primary", primary),
+		zap.Error(err),
+	)
+
+	// Fallback to replica
+	resp, err = s.doGetField(ctx, replica, req.PrimaryKey, req.FieldName, partitionID)
 	if err != nil {
-		s.logger.Error("Patch failed",
-			zap.Uint32("partition_id", partitionID),
-			zap.Error(err),
-		)
-		return nil, status.Errorf(codes.Internal, "patch failed: %v", err)
+		return nil, status.Errorf(codes.Internal, "get_field failed on both replicas: %v", err)
 	}
 
-	return &pb.PatchResponse{Success: true, NewValue: newValue}, nil
+	return resp, nil
 }
 
-// convertPatchOperations converts protobuf patch operations to internal format
-func (s *Server) convertPatchOperations(ops []*pb.PatchOperation) ([]byte, error) {
-	patch := &storage.Patch{
-		Operations: make([]storage.PatchOperation, len(ops)),
-	}
-
-	for i, op := range ops {
-		var opType storage.PatchOpType
-		switch op.Op {
-		case pb.PatchOperation_SET:
-			opType = storage.PatchOpSet
-		case pb.PatchOperation_DELETE:
-			opType = storage.PatchOpDelete
-		case pb.PatchOperation_INCR:
-			opType = storage.PatchOpIncr
-		case pb.PatchOperation_APPEND:
-			opType = storage.PatchOpAppend
-		}
-		patch.Operations[i] = storage.PatchOperation{
-			Op:    opType,
-			Path:  op.Path,
-			Value: op.Value,
-		}
-	}
-
-	return patch.Encode(), nil
-}
-
-// doPatch performs a patch operation on a specific node
-func (s *Server) doPatch(ctx context.Context, nodeID string, key, patchData []byte, partitionID uint32) ([]byte, error) {
+// doGetField performs a get field operation on a specific node
+func (s *Server) doGetField(ctx context.Context, nodeID string, pk []byte, fieldName string, partitionID uint32) (*pb.GetFieldResponse, error) {
 	addr, err := s.nodeResolver.ResolveAddr(nodeID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve node address: %w", err)
@@ -394,20 +366,228 @@ func (s *Server) doPatch(ctx context.Context, nodeID string, key, patchData []by
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
 
-	resp, err := client.Patch(ctx, &pb.StoragePatchRequest{
-		Key:         key,
-		PatchData:   patchData,
+	resp, err := client.GetField(ctx, &pb.StorageGetFieldRequest{
+		PrimaryKey:  pk,
+		FieldName:   fieldName,
 		PartitionId: partitionID,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("storage patch failed: %w", err)
+		return nil, fmt.Errorf("storage get_field failed: %w", err)
 	}
 
-	if !resp.Success || resp.Error != pb.ErrorCode_OK {
+	if resp.Error != pb.ErrorCode_OK {
 		return nil, fmt.Errorf("storage error: %s", resp.Error.String())
 	}
 
-	return resp.NewValue, nil
+	return &pb.GetFieldResponse{
+		Value: resp.Value,
+		Found: resp.Found,
+	}, nil
+}
+
+// SetField implements KVService.SetField - sets a single field
+func (s *Server) SetField(ctx context.Context, req *pb.SetFieldRequest) (*pb.SetFieldResponse, error) {
+	start := time.Now()
+	defer func() {
+		common.StorageLatency.WithLabelValues("client_set_field").Observe(time.Since(start).Seconds())
+	}()
+
+	// Get partition nodes
+	primary, _, partitionID, err := s.router.GetPartitionNodes(req.PrimaryKey)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
+	}
+
+	// Set field only on Primary - Replica will sync via command log replication
+	if err := s.doSetFields(ctx, primary, req.PrimaryKey, []*pb.FieldValue{
+		{FieldName: req.FieldName, Value: req.Value, IsDelete: false},
+	}, partitionID); err != nil {
+		s.logger.Error("SetField failed",
+			zap.Uint32("partition_id", partitionID),
+			zap.Error(err),
+		)
+		return nil, status.Errorf(codes.Internal, "set_field failed: %v", err)
+	}
+
+	return &pb.SetFieldResponse{Success: true}, nil
+}
+
+// SetFields implements KVService.SetFields - sets multiple fields atomically
+func (s *Server) SetFields(ctx context.Context, req *pb.SetFieldsRequest) (*pb.SetFieldsResponse, error) {
+	start := time.Now()
+	defer func() {
+		common.StorageLatency.WithLabelValues("client_set_fields").Observe(time.Since(start).Seconds())
+	}()
+
+	// Get partition nodes
+	primary, _, partitionID, err := s.router.GetPartitionNodes(req.PrimaryKey)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
+	}
+
+	// Set fields only on Primary - Replica will sync via command log replication
+	if err := s.doSetFields(ctx, primary, req.PrimaryKey, req.Fields, partitionID); err != nil {
+		s.logger.Error("SetFields failed",
+			zap.Uint32("partition_id", partitionID),
+			zap.Error(err),
+		)
+		return nil, status.Errorf(codes.Internal, "set_fields failed: %v", err)
+	}
+
+	return &pb.SetFieldsResponse{Success: true}, nil
+}
+
+// doSetFields performs a set fields operation on a specific node
+func (s *Server) doSetFields(ctx context.Context, nodeID string, pk []byte, fields []*pb.FieldValue, partitionID uint32) error {
+	addr, err := s.nodeResolver.ResolveAddr(nodeID)
+	if err != nil {
+		return fmt.Errorf("failed to resolve node address: %w", err)
+	}
+
+	client, err := s.pool.GetStorageClient(addr)
+	if err != nil {
+		return fmt.Errorf("failed to get storage client: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+	defer cancel()
+
+	resp, err := client.SetFields(ctx, &pb.StorageSetFieldsRequest{
+		PrimaryKey:  pk,
+		Fields:      fields,
+		PartitionId: partitionID,
+	})
+	if err != nil {
+		return fmt.Errorf("storage set_fields failed: %w", err)
+	}
+
+	if !resp.Success || resp.Error != pb.ErrorCode_OK {
+		return fmt.Errorf("storage error: %s", resp.Error.String())
+	}
+
+	return nil
+}
+
+// DeleteField implements KVService.DeleteField - deletes a single field
+func (s *Server) DeleteField(ctx context.Context, req *pb.DeleteFieldRequest) (*pb.DeleteFieldResponse, error) {
+	start := time.Now()
+	defer func() {
+		common.StorageLatency.WithLabelValues("client_delete_field").Observe(time.Since(start).Seconds())
+	}()
+
+	// Get partition nodes
+	primary, _, partitionID, err := s.router.GetPartitionNodes(req.PrimaryKey)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
+	}
+
+	// Delete field only on Primary - Replica will sync via command log replication
+	if err := s.doDeleteField(ctx, primary, req.PrimaryKey, req.FieldName, partitionID); err != nil {
+		s.logger.Error("DeleteField failed",
+			zap.Uint32("partition_id", partitionID),
+			zap.Error(err),
+		)
+		return nil, status.Errorf(codes.Internal, "delete_field failed: %v", err)
+	}
+
+	return &pb.DeleteFieldResponse{Success: true}, nil
+}
+
+// doDeleteField performs a delete field operation on a specific node
+func (s *Server) doDeleteField(ctx context.Context, nodeID string, pk []byte, fieldName string, partitionID uint32) error {
+	addr, err := s.nodeResolver.ResolveAddr(nodeID)
+	if err != nil {
+		return fmt.Errorf("failed to resolve node address: %w", err)
+	}
+
+	client, err := s.pool.GetStorageClient(addr)
+	if err != nil {
+		return fmt.Errorf("failed to get storage client: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+	defer cancel()
+
+	resp, err := client.DeleteField(ctx, &pb.StorageDeleteFieldRequest{
+		PrimaryKey:  pk,
+		FieldName:   fieldName,
+		PartitionId: partitionID,
+	})
+	if err != nil {
+		return fmt.Errorf("storage delete_field failed: %w", err)
+	}
+
+	if !resp.Success || resp.Error != pb.ErrorCode_OK {
+		return fmt.Errorf("storage error: %s", resp.Error.String())
+	}
+
+	return nil
+}
+
+// GetAllFields implements KVService.GetAllFields - retrieves all fields for a document
+func (s *Server) GetAllFields(ctx context.Context, req *pb.GetAllFieldsRequest) (*pb.GetAllFieldsResponse, error) {
+	start := time.Now()
+	defer func() {
+		common.StorageLatency.WithLabelValues("client_get_all_fields").Observe(time.Since(start).Seconds())
+	}()
+
+	// Get partition nodes
+	primary, replica, partitionID, err := s.router.GetPartitionNodes(req.PrimaryKey)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "routing failed: %v", err)
+	}
+
+	// Try primary first
+	resp, err := s.doGetAllFields(ctx, primary, req.PrimaryKey, partitionID)
+	if err == nil {
+		return resp, nil
+	}
+
+	s.logger.Warn("Primary get_all_fields failed, trying replica",
+		zap.String("primary", primary),
+		zap.Error(err),
+	)
+
+	// Fallback to replica
+	resp, err = s.doGetAllFields(ctx, replica, req.PrimaryKey, partitionID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get_all_fields failed on both replicas: %v", err)
+	}
+
+	return resp, nil
+}
+
+// doGetAllFields performs a get all fields operation on a specific node
+func (s *Server) doGetAllFields(ctx context.Context, nodeID string, pk []byte, partitionID uint32) (*pb.GetAllFieldsResponse, error) {
+	addr, err := s.nodeResolver.ResolveAddr(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve node address: %w", err)
+	}
+
+	client, err := s.pool.GetStorageClient(addr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get storage client: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+	defer cancel()
+
+	resp, err := client.GetAllFields(ctx, &pb.StorageGetAllFieldsRequest{
+		PrimaryKey:  pk,
+		PartitionId: partitionID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("storage get_all_fields failed: %w", err)
+	}
+
+	if resp.Error != pb.ErrorCode_OK {
+		return nil, fmt.Errorf("storage error: %s", resp.Error.String())
+	}
+
+	return &pb.GetAllFieldsResponse{
+		Fields: resp.Fields,
+		Found:  resp.Found,
+	}, nil
 }
 
 // BatchGet implements KVService.BatchGet
