@@ -39,8 +39,8 @@ func main() {
 		logger.Fatal("Failed to load config", zap.Error(err))
 	}
 
-	// Create server
-	server, err := metadata.NewServer(config)
+	// Create HA server (supports both single-node and HA mode)
+	server, err := metadata.NewHAServer(config)
 	if err != nil {
 		logger.Fatal("Failed to create server", zap.Error(err))
 	}
@@ -93,7 +93,7 @@ func main() {
 	logger.Info("Server stopped")
 }
 
-func loadConfig(path string) (*metadata.ServerConfig, error) {
+func loadConfig(path string) (*metadata.HAServerConfig, error) {
 	viper.SetConfigFile(path)
 	viper.SetConfigType("yaml")
 
@@ -102,6 +102,7 @@ func loadConfig(path string) (*metadata.ServerConfig, error) {
 	viper.SetDefault("listen_addr", ":9000")
 	viper.SetDefault("etcd.endpoints", []string{"localhost:2379"})
 	viper.SetDefault("etcd.dial_timeout", "5s")
+	viper.SetDefault("ha_enabled", false)
 
 	// Read config file
 	if err := viper.ReadInConfig(); err != nil {
@@ -114,15 +115,18 @@ func loadConfig(path string) (*metadata.ServerConfig, error) {
 	// Environment variable overrides
 	viper.AutomaticEnv()
 
-	config := &metadata.ServerConfig{
-		NodeID:     viper.GetString("node_id"),
-		ListenAddr: viper.GetString("listen_addr"),
-		Etcd: &metadata.EtcdConfig{
-			Endpoints:   viper.GetStringSlice("etcd.endpoints"),
-			DialTimeout: viper.GetDuration("etcd.dial_timeout"),
-			Username:    viper.GetString("etcd.username"),
-			Password:    viper.GetString("etcd.password"),
+	config := &metadata.HAServerConfig{
+		ServerConfig: &metadata.ServerConfig{
+			NodeID:     viper.GetString("node_id"),
+			ListenAddr: viper.GetString("listen_addr"),
+			Etcd: &metadata.EtcdConfig{
+				Endpoints:   viper.GetStringSlice("etcd.endpoints"),
+				DialTimeout: viper.GetDuration("etcd.dial_timeout"),
+				Username:    viper.GetString("etcd.username"),
+				Password:    viper.GetString("etcd.password"),
+			},
 		},
+		HAEnabled: viper.GetBool("ha_enabled"),
 	}
 
 	return config, nil

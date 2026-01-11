@@ -320,6 +320,100 @@ To add a new compute or storage node:
 3. Update `scripts/start-all.sh`, `scripts/stop-all.sh`, `scripts/status.sh`
 4. Rebuild and restart: `make build-darwin-arm64 && ./scripts/start-all.sh`
 
+## Metadata High Availability (HA)
+
+The metadata service supports high availability through leader election using etcd.
+
+### HA Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                       Metadata Cluster (HA)                       │
+│                                                                   │
+│  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐            │
+│  │ Metadata-1  │   │ Metadata-2  │   │ Metadata-3  │            │
+│  │  (Leader)   │   │ (Follower)  │   │ (Follower)  │            │
+│  │   :9000     │   │   :9010     │   │   :9020     │            │
+│  └──────┬──────┘   └──────┬──────┘   └──────┬──────┘            │
+│         │                 │                 │                    │
+│         └─────────────────┼─────────────────┘                    │
+│                           │                                      │
+│                    ┌──────┴──────┐                               │
+│                    │    etcd     │                               │
+│                    │   :2379     │                               │
+│                    └─────────────┘                               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Features
+
+- **Leader Election**: Uses etcd concurrency.Election for leader election
+- **Automatic Failover**: If leader fails, a new leader is elected automatically
+- **Write Forwarding**: Only the leader can process write operations (RegisterNode, InitCluster, TriggerRebalance, etc.)
+- **Read Scaling**: All nodes can serve read operations (GetRouteTable, GetClusterInfo, etc.)
+- **Leader Discovery**: Clients can use `GetLeaderInfo` RPC to discover the current leader
+
+### Configuration
+
+Enable HA mode in the metadata configuration:
+
+```yaml
+# config/local/metadata.yaml
+node_id: "metadata-1"
+listen_addr: ":9000"
+
+etcd:
+  endpoints:
+    - "localhost:2379"
+  dial_timeout: "5s"
+
+# Enable HA mode
+ha_enabled: true
+```
+
+### Deploying Multiple Metadata Nodes
+
+1. Create separate config files for each node with unique `node_id` and `listen_addr`
+2. Start each node with its respective config
+3. All nodes connect to the same etcd cluster for coordination
+
+Example for 3-node HA cluster:
+
+```bash
+# Node 1 (metadata-1.yaml)
+node_id: "metadata-1"
+listen_addr: ":9000"
+ha_enabled: true
+
+# Node 2 (metadata-2.yaml)
+node_id: "metadata-2"
+listen_addr: ":9010"
+ha_enabled: true
+
+# Node 3 (metadata-3.yaml)
+node_id: "metadata-3"
+listen_addr: ":9020"
+ha_enabled: true
+```
+
+### API Behavior in HA Mode
+
+| Operation | Leader Only | All Nodes |
+|-----------|-------------|-----------|
+| RegisterNode | Yes | - |
+| InitCluster | Yes | - |
+| TriggerRebalance | Yes | - |
+| CancelMigration | Yes | - |
+| ShutdownNode | Yes | - |
+| GetRouteTable | - | Yes |
+| GetClusterInfo | - | Yes |
+| GetMigrationStatus | - | Yes |
+| GetLeaderInfo | - | Yes |
+| Heartbeat | - | Yes |
+| SubscribeRouteUpdates | - | Yes |
+
+When a non-leader node receives a write request, it returns `FailedPrecondition` error with the current leader ID.
+
 # 开发规范
 
 ## ⚠️ 强制规则

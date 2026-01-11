@@ -7,3 +7,8 @@ etcd:
   endpoints:
     - "localhost:2379"
   dial_timeout: "5s"
+
+# HA Configuration
+# Set to true to enable leader election for multi-node deployment
+# When enabled, only the leader node can process write operations
+ha_enabled: false

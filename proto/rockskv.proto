@@ -49,6 +49,9 @@ service MetadataService {
   // Node lifecycle APIs (Controlled Shutdown)
   rpc ShutdownNode(ShutdownNodeRequest) returns (ShutdownNodeResponse);
   rpc GetNodeStatus(GetNodeStatusRequest) returns (GetNodeStatusResponse);
+
+  // HA Leader APIs
+  rpc GetLeaderInfo(GetLeaderInfoRequest) returns (GetLeaderInfoResponse);
 }
 
 // ========== KVService 消息定义 ==========
@@ -452,4 +455,15 @@ message MigrationConfig {
   int32 max_concurrent = 2;          // Max concurrent partition migrations, 0 for default (4)
   MigrationPriority priority = 3;    // Priority for this migration batch
   bool pause_on_error = 4;           // Pause remaining migrations if one fails
+}
+
+// ========== HA Leader 消息定义 ==========
+
+message GetLeaderInfoRequest {}
+
+message GetLeaderInfoResponse {
+  string leader_id = 1;      // Current leader node ID
+  string leader_addr = 2;    // Current leader address
+  bool is_leader = 3;        // Whether this node is the leader
+  bool ha_enabled = 4;       // Whether HA mode is enabled
 }
