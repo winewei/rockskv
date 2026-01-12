@@ -33,21 +33,21 @@ etcd:
 		t.Fatalf("loadConfig failed: %v", err)
 	}
 
-	// Verify fields
-	if config.ServerConfig.NodeID != "test-metadata-1" {
-		t.Errorf("NodeID: got %q, expected %q", config.ServerConfig.NodeID, "test-metadata-1")
+	// Verify fields (ServerConfig is embedded, access fields directly)
+	if config.NodeID != "test-metadata-1" {
+		t.Errorf("NodeID: got %q, expected %q", config.NodeID, "test-metadata-1")
 	}
-	if config.ServerConfig.ListenAddr != ":19000" {
-		t.Errorf("ListenAddr: got %q, expected %q", config.ServerConfig.ListenAddr, ":19000")
+	if config.ListenAddr != ":19000" {
+		t.Errorf("ListenAddr: got %q, expected %q", config.ListenAddr, ":19000")
 	}
 	if !config.HAEnabled {
 		t.Error("HAEnabled should be true")
 	}
-	if len(config.ServerConfig.Etcd.Endpoints) != 2 {
-		t.Errorf("Etcd.Endpoints: got %d, expected 2", len(config.ServerConfig.Etcd.Endpoints))
+	if len(config.Etcd.Endpoints) != 2 {
+		t.Errorf("Etcd.Endpoints: got %d, expected 2", len(config.Etcd.Endpoints))
 	}
-	if config.ServerConfig.Etcd.DialTimeout != 10*time.Second {
-		t.Errorf("Etcd.DialTimeout: got %v, expected 10s", config.ServerConfig.Etcd.DialTimeout)
+	if config.Etcd.DialTimeout != 10*time.Second {
+		t.Errorf("Etcd.DialTimeout: got %v, expected 10s", config.Etcd.DialTimeout)
 	}
 }
 
@@ -68,10 +68,10 @@ node_id: "minimal-metadata"
 	}
 
 	// Verify defaults
-	if config.ServerConfig.ListenAddr == "" {
+	if config.ListenAddr == "" {
 		t.Error("ListenAddr should have default value")
 	}
-	if len(config.ServerConfig.Etcd.Endpoints) == 0 {
+	if len(config.Etcd.Endpoints) == 0 {
 		t.Error("Etcd.Endpoints should have default value")
 	}
 	if config.HAEnabled {
@@ -91,13 +91,13 @@ func TestLoadConfigWithLocalFile(t *testing.T) {
 	}
 
 	// Critical fields must not be empty
-	if config.ServerConfig.NodeID == "" {
+	if config.NodeID == "" {
 		t.Error("NodeID is empty")
 	}
-	if config.ServerConfig.ListenAddr == "" {
+	if config.ListenAddr == "" {
 		t.Error("ListenAddr is empty")
 	}
-	if config.ServerConfig.Etcd == nil || len(config.ServerConfig.Etcd.Endpoints) == 0 {
+	if config.Etcd == nil || len(config.Etcd.Endpoints) == 0 {
 		t.Error("Etcd.Endpoints is empty")
 	}
 }
