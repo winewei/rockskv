@@ -8,6 +8,7 @@ on:
 
 env:
   GO_VERSION: '1.21'
+  ROCKSDB_VERSION: '10.7.5'
 
 jobs:
   e2e-test:
@@ -50,20 +51,20 @@ jobs:
       id: cache-rocksdb
       uses: actions/cache@v4
       with:
-        path: ~/rocksdb-10.7.5
-        key: rocksdb-10.7.5-ubuntu-24.04-v1
+        path: ~/rocksdb-${{ env.ROCKSDB_VERSION }}
+        key: rocksdb-${{ env.ROCKSDB_VERSION }}-ubuntu-24.04-v1
 
     - name: Build RocksDB from source
       if: steps.cache-rocksdb.outputs.cache-hit != 'true'
       run: |
         cd ~
-        git clone --depth 1 --branch v10.7.5 https://github.com/facebook/rocksdb.git rocksdb-10.7.5
-        cd rocksdb-10.7.5
+        git clone --depth 1 --branch v${{ env.ROCKSDB_VERSION }} https://github.com/facebook/rocksdb.git rocksdb-${{ env.ROCKSDB_VERSION }}
+        cd rocksdb-${{ env.ROCKSDB_VERSION }}
         make shared_lib -j$(nproc)
 
     - name: Install RocksDB
       run: |
-        cd ~/rocksdb-10.7.5
+        cd ~/rocksdb-${{ env.ROCKSDB_VERSION }}
         sudo make install-shared INSTALL_PATH=/usr/local
         sudo ldconfig
 

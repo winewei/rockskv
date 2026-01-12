@@ -115,15 +115,15 @@ Integration Tests
 
 **测试用例**：
 - [x] TestSSTExport：从源节点导出 SST 文件 ✅ 已修复通过
-- [ ] TestSSTImport：目标节点导入 SST 文件 (已跳过 - 待更新)
+- [x] TestSSTImport：目标节点导入 SST 文件 ✅ 已修复通过
 - [ ] TestMigrationTriggerRebalance：触发重平衡迁移 (已跳过 - 需要 MigrationController)
 - [ ] TestMigrationCancel：取消进行中的迁移 (已跳过 - 待实现)
 - [ ] TestConcurrentMigrations：并发迁移多个分区 (已跳过 - 待实现)
 
 **测试结果**：
-- 1 个测试通过，4 个测试跳过
-- 执行时间：~45 秒
-- 覆盖场景：SST 导出功能验证
+- 2 个测试通过，3 个测试跳过
+- 执行时间：~128 秒（约 2 分钟）
+- 覆盖场景：SST 导出和导入功能验证
 
 **已修复问题** (2026-01-12)：
 1. **Epoch 字段缺失**：`GetRouteTable` 和 `sendRouteUpdate` 返回的分区信息缺少 Epoch 字段
@@ -136,7 +136,6 @@ Integration Tests
 - 2 个 Storage 节点
 
 **下一步**：
-- 更新 TestSSTImport 测试使用相同模式
 - 实现 MigrationController 相关测试
 - 实现迁移取消和并发迁移测试
 
@@ -346,7 +345,7 @@ test-integration-e2e:
 - ✅ Metadata HA: 1 个测试文件，7 个集成测试
 - ✅ Metadata Route Table: 1 个测试文件，5 个集成测试（4个通过，1个跳过）
 - ✅ Metadata Node Registration: 1 个测试文件，5 个集成测试
-- ⚠️ Migration: 1 个测试文件，5 个测试（1个通过，4个跳过）
+- ⚠️ Migration: 1 个测试文件，5 个测试（2个通过，3个跳过）
 - ⚠️ Compute-Storage: 1 个测试文件，4 个测试（全部跳过 - 待实现）
 - ⚠️ E2E: 1 个测试文件，5 个测试（全部跳过 - 待实现）
 - ✅ Makefile 更新：支持 ./pkg/storage/... 和 ./pkg/metadata/... 和 ./test/integration/...
@@ -354,23 +353,23 @@ test-integration-e2e:
 
 **测试统计**：
 - 总测试文件：9 个
-- 总测试用例：38 个（24个通过，14个跳过）
-- 执行时间：~90 秒（通过的测试，包含 etcd 启动和清理）
+- 总测试用例：38 个（25个通过，13个跳过）
+- 执行时间：~175 秒（约 3 分钟，通过的测试，包含 etcd 启动和清理）
 - 框架完成度：100%（所有 5 个阶段的测试框架已搭建）
-- 实现完成度：63%（24/38 测试实现并通过）
+- 实现完成度：66%（25/38 测试实现并通过）
 
 **测试框架已搭建但待实现**：
-- ⚠️ 分区迁移集成测试 - 4个测试跳过（TestSSTExport 已通过）
+- ⚠️ 分区迁移集成测试 - 3个测试跳过（TestSSTExport 和 TestSSTImport 已通过）
 - ⚠️ Compute-Storage 集成测试 - 4个测试跳过（待实现）
 - ⚠️ E2E 集成测试 - 5个测试跳过（最复杂场景，现有 smoke-test.sh 提供基本覆盖）
 
 **关键里程碑**：
 - ✅ 所有 5 个测试阶段的框架已完成
 - ✅ Storage 和 Metadata 层测试全部通过
-- ✅ Migration TestSSTExport 已修复并通过（2026-01-12）
+- ✅ Migration TestSSTExport 和 TestSSTImport 已修复并通过（2026-01-12）
 - ✅ 每个跳过的测试都包含详细的TODO和实现计划
 
-**进度**：38 个测试框架完成 / 24 个测试实现通过 (框架 100% 完成，实现 63% 完成)
+**进度**：38 个测试框架完成 / 25 个测试实现通过 (框架 100% 完成，实现 66% 完成)
 
 ---
 
