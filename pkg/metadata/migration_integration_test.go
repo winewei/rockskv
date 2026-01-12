@@ -218,8 +218,39 @@ func TestSSTExport(t *testing.T) {
 	defer storageConn.Close()
 	storageClient := pb.NewStorageServiceClient(storageConn)
 
-	// Put some test data in partition 0
+	// Wait for storage node to receive partition assignment
+	// Poll until the first Put succeeds (indicating partition is ready)
 	partitionID := uint32(0)
+	var partitionReady bool
+	for attempt := 0; attempt < 30; attempt++ {
+		testResp, err := storageClient.Put(ctx, &pb.StoragePutRequest{
+			Key:         []byte("partition-ready-check"),
+			Value:       []byte("test"),
+			PartitionId: partitionID,
+			Epoch:       partition0.Epoch,
+		})
+		if err == nil && testResp.Success {
+			partitionReady = true
+			t.Logf("Partition %d is ready (attempt %d)", partitionID, attempt+1)
+			break
+		}
+		if testResp != nil && testResp.Error == pb.ErrorCode_PARTITION_NOT_FOUND {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		// Other errors - log and continue
+		if err != nil {
+			t.Logf("Put check attempt %d: err=%v", attempt+1, err)
+		} else {
+			t.Logf("Put check attempt %d: error_code=%v", attempt+1, testResp.Error)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !partitionReady {
+		t.Fatalf("Partition %d not ready after 15 seconds", partitionID)
+	}
+
+	// Put some test data in partition 0
 	successCount := 0
 	for i := 0; i < 100; i++ {
 		key := fmt.Sprintf("test-key-%d", i)

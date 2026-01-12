@@ -94,6 +94,11 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
         cache: true
 
+    # RocksDB installation is required for golangci-lint because:
+    # 1. The codebase uses grocksdb (CGO bindings to RocksDB)
+    # 2. golangci-lint needs CGO headers for type checking
+    # 3. Some linters (like staticcheck) require full type information
+    # Cache is shared with build-cgo job to minimize build time (~2 min with cache hit)
     - name: Install RocksDB dependencies
       run: |
         sudo apt-get update
