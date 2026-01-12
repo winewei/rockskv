@@ -12,7 +12,7 @@ env:
 jobs:
   e2e-test:
     name: E2E Integration Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       etcd:
@@ -51,7 +51,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/rocksdb-10.7.5
-        key: rocksdb-10.7.5-ubuntu-latest-v1
+        key: rocksdb-10.7.5-ubuntu-24.04-v1
 
     - name: Build RocksDB from source
       if: steps.cache-rocksdb.outputs.cache-hit != 'true'

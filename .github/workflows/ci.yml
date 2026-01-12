@@ -111,7 +111,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/rocksdb-${{ env.ROCKSDB_VERSION }}
-        key: rocksdb-${{ env.ROCKSDB_VERSION }}-ubuntu-24.04-lint-v1
+        key: rocksdb-${{ env.ROCKSDB_VERSION }}-ubuntu-24.04-v1
 
     - name: Build RocksDB from source
       if: steps.cache-rocksdb.outputs.cache-hit != 'true'
