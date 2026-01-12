@@ -15,6 +15,9 @@ func TestLoadConfig(t *testing.T) {
 node_id: "test-storage-1"
 listen_addr: ":19001"
 metadata_addr: "localhost:19000"
+etcd_endpoints:
+  - "localhost:12379"
+  - "localhost:22379"
 sst_dir: "./test-sst"
 command_log_dir: "./test-cmdlog"
 
@@ -35,6 +38,11 @@ rocksdb:
 	config, err := loadConfig(configPath)
 	if err != nil {
 		t.Fatalf("loadConfig failed: %v", err)
+	}
+
+	// Verify EtcdEndpoints separately (slice comparison)
+	if len(config.EtcdEndpoints) != 2 {
+		t.Errorf("EtcdEndpoints: got %d endpoints, expected 2", len(config.EtcdEndpoints))
 	}
 
 	// Verify all fields are loaded correctly
@@ -84,6 +92,11 @@ node_id: "minimal-node"
 	}
 
 	// Verify critical fields have defaults (not empty)
+	// Verify EtcdEndpoints has default
+	if len(config.EtcdEndpoints) == 0 {
+		t.Error("EtcdEndpoints should have default value")
+	}
+
 	criticalFields := []struct {
 		name  string
 		value string
@@ -129,6 +142,9 @@ func TestLoadConfigWithLocalFile(t *testing.T) {
 	}
 	if config.SSTDir == "" {
 		t.Error("SSTDir is empty after loading local config")
+	}
+	if len(config.EtcdEndpoints) == 0 {
+		t.Error("EtcdEndpoints is empty after loading local config - this will cause service startup failure")
 	}
 	if config.RocksDB == nil {
 		t.Fatal("RocksDB config is nil")

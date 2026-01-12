@@ -4,6 +4,8 @@ listen_addr: ":9002"
 metadata_addr: "localhost:9000"
 metrics_addr: ":9092"
 sst_dir: "./data/sst2"
+etcd_endpoints:
+  - "localhost:2379"
 
 # RocksDB Configuration
 rocksdb:
