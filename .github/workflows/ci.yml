@@ -82,7 +82,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - name: Checkout code
@@ -94,11 +94,48 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
         cache: true
 
+    - name: Install RocksDB dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          libgflags-dev \
+          libsnappy-dev \
+          zlib1g-dev \
+          libbz2-dev \
+          liblz4-dev \
+          libzstd-dev
+
+    - name: Cache RocksDB
+      id: cache-rocksdb
+      uses: actions/cache@v4
+      with:
+        path: ~/rocksdb-${{ env.ROCKSDB_VERSION }}
+        key: rocksdb-${{ env.ROCKSDB_VERSION }}-ubuntu-24.04-lint-v1
+
+    - name: Build RocksDB from source
+      if: steps.cache-rocksdb.outputs.cache-hit != 'true'
+      run: |
+        cd ~
+        git clone --depth 1 --branch v${{ env.ROCKSDB_VERSION }} https://github.com/facebook/rocksdb.git rocksdb-${{ env.ROCKSDB_VERSION }}
+        cd rocksdb-${{ env.ROCKSDB_VERSION }}
+        make shared_lib -j$(nproc)
+
+    - name: Install RocksDB
+      run: |
+        cd ~/rocksdb-${{ env.ROCKSDB_VERSION }}
+        sudo make install-shared INSTALL_PATH=/usr/local
+        sudo ldconfig
+
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v7
       with:
         version: v2.0.2
         args: --timeout=5m
+      env:
+        CGO_ENABLED: 1
+        CGO_CFLAGS: -I/usr/local/include
+        CGO_LDFLAGS: -L/usr/local/lib
 
   # Note: Cross-platform binary builds removed - RocksKV requires CGO and RocksDB
   # For distribution, use Docker images (make docker-build) or build on target platform
