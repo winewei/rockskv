@@ -40,45 +40,44 @@ echo ""
 echo -e "${BLUE}=== Check Runs ===${NC}"
 echo ""
 
-# Get all check runs
-CHECKS=$(gh pr checks "$PR_NUMBER" --json name,state,conclusion,startedAt,completedAt,detailsUrl 2>/dev/null || echo "[]")
+# Get all check runs (use text output as --json may be empty)
+CHECKS_TEXT=$(gh pr checks "$PR_NUMBER" 2>/dev/null)
 
-if [ "$CHECKS" = "[]" ] || [ -z "$CHECKS" ]; then
+if [ -z "$CHECKS_TEXT" ]; then
     echo -e "${YELLOW}No checks found yet. CI may still be starting...${NC}"
-    exit 0
+else
+    # Count statuses from text output
+    TOTAL=$(echo "$CHECKS_TEXT" | wc -l | tr -d ' \n')
+    PASSED=$(echo "$CHECKS_TEXT" | grep -c "	pass	" || true)
+    FAILED=$(echo "$CHECKS_TEXT" | grep -c "	fail	" || true)
+    PENDING=$(echo "$CHECKS_TEXT" | grep -cE "	(pending|queued|in_progress)	" || true)
+    SKIPPED=$(echo "$CHECKS_TEXT" | grep -c "	skipped	" || true)
+
+    echo -e "Total: ${TOTAL} | ${GREEN}Passed: ${PASSED}${NC} | ${RED}Failed: ${FAILED}${NC} | ${YELLOW}Pending: ${PENDING}${NC} | Skipped: ${SKIPPED}"
+    echo ""
+
+    # Show each check (format: name<tab>status<tab>time<tab>url)
+    echo "$CHECKS_TEXT" | while IFS=$'\t' read -r name status time url; do
+        if [ "$status" = "pass" ]; then
+            echo -e "  ${GREEN}✓${NC} $name ($time)"
+        elif [ "$status" = "fail" ]; then
+            echo -e "  ${RED}✗${NC} $name ($time)"
+        elif [ "$status" = "pending" ] || [ "$status" = "queued" ]; then
+            echo -e "  ${YELLOW}○${NC} $name (pending)"
+        elif [ "$status" = "in_progress" ]; then
+            echo -e "  ${YELLOW}◐${NC} $name (running)"
+        elif [ "$status" = "skipped" ]; then
+            echo -e "  ${BLUE}—${NC} $name (skipped)"
+        else
+            echo -e "  ? $name ($status)"
+        fi
+    done
 fi
 
-# Count statuses
-TOTAL=$(echo "$CHECKS" | jq 'length')
-PASSED=$(echo "$CHECKS" | jq '[.[] | select(.conclusion == "success")] | length')
-FAILED=$(echo "$CHECKS" | jq '[.[] | select(.conclusion == "failure")] | length')
-PENDING=$(echo "$CHECKS" | jq '[.[] | select(.state == "pending" or .state == "queued" or .state == "in_progress")] | length')
-SKIPPED=$(echo "$CHECKS" | jq '[.[] | select(.conclusion == "skipped")] | length')
-
-echo -e "Total: ${TOTAL} | ${GREEN}Passed: ${PASSED}${NC} | ${RED}Failed: ${FAILED}${NC} | ${YELLOW}Pending: ${PENDING}${NC} | Skipped: ${SKIPPED}"
 echo ""
 
-# Show each check
-echo "$CHECKS" | jq -r '.[] | [.name, .state, .conclusion // "—"] | @tsv' | while IFS=$'\t' read -r name state conclusion; do
-    if [ "$conclusion" = "success" ]; then
-        echo -e "  ${GREEN}✓${NC} $name"
-    elif [ "$conclusion" = "failure" ]; then
-        echo -e "  ${RED}✗${NC} $name"
-    elif [ "$state" = "pending" ] || [ "$state" = "queued" ]; then
-        echo -e "  ${YELLOW}○${NC} $name (pending)"
-    elif [ "$state" = "in_progress" ]; then
-        echo -e "  ${YELLOW}◐${NC} $name (running)"
-    elif [ "$conclusion" = "skipped" ]; then
-        echo -e "  ${BLUE}—${NC} $name (skipped)"
-    else
-        echo -e "  ? $name ($state/$conclusion)"
-    fi
-done
-
-echo ""
-
-# Show failed checks details
-FAILED_CHECKS=$(echo "$CHECKS" | jq -r '.[] | select(.conclusion == "failure") | .name')
+# Show failed checks details (extract from text output)
+FAILED_CHECKS=$(echo "$CHECKS_TEXT" | grep "fail" | awk '{print $1}')
 
 if [ -n "$FAILED_CHECKS" ]; then
     echo -e "${RED}=== Failed Checks Details ===${NC}"
@@ -90,45 +89,22 @@ if [ -n "$FAILED_CHECKS" ]; then
     echo "$FAILED_CHECKS" | while read -r check_name; do
         echo -e "${RED}--- $check_name ---${NC}"
 
-        # Find the run ID for this check
-        RUN_ID=$(echo "$RUNS" | jq -r --arg name "$check_name" '.[] | select(.name == $name and .conclusion == "failure") | .databaseId' | head -1)
-
-        if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
-            echo "Run ID: $RUN_ID"
-            echo ""
-
-            # Get failed jobs
-            FAILED_JOBS=$(gh run view "$RUN_ID" --json jobs -q '.jobs[] | select(.conclusion == "failure") | .name' 2>/dev/null)
-
-            if [ -n "$FAILED_JOBS" ]; then
-                echo "$FAILED_JOBS" | while read -r job_name; do
-                    echo -e "${YELLOW}Job: $job_name${NC}"
-                    echo ""
-
-                    # Get job logs (last 50 lines of failed step)
-                    echo "Fetching logs..."
-                    gh run view "$RUN_ID" --log-failed 2>/dev/null | tail -100 || echo "Could not fetch logs"
-                    echo ""
-                done
+        # Try to find by workflow name pattern
+        for workflow in "CI" "E2E Tests"; do
+            RUN_ID=$(echo "$RUNS" | jq -r --arg name "$workflow" '.[] | select(.name == $name and .conclusion == "failure") | .databaseId' | head -1)
+            if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
+                echo "Found in workflow: $workflow (Run ID: $RUN_ID)"
+                echo ""
+                gh run view "$RUN_ID" --log-failed 2>/dev/null | tail -100 || echo "Could not fetch logs"
+                break
             fi
-        else
-            # Try to find by workflow name pattern
-            for workflow in "CI" "E2E Tests"; do
-                RUN_ID=$(echo "$RUNS" | jq -r --arg name "$workflow" '.[] | select(.name == $name and .conclusion == "failure") | .databaseId' | head -1)
-                if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
-                    echo "Found in workflow: $workflow (Run ID: $RUN_ID)"
-                    echo ""
-                    gh run view "$RUN_ID" --log-failed 2>/dev/null | tail -100 || echo "Could not fetch logs"
-                    break
-                fi
-            done
-        fi
+        done
         echo ""
     done
 fi
 
-# Show pending checks
-PENDING_CHECKS=$(echo "$CHECKS" | jq -r '.[] | select(.state == "pending" or .state == "queued" or .state == "in_progress") | .name')
+# Show pending checks (extract from text output)
+PENDING_CHECKS=$(echo "$CHECKS_TEXT" | grep -E "pending|queued|in_progress" | awk '{print $1}')
 
 if [ -n "$PENDING_CHECKS" ]; then
     echo -e "${YELLOW}=== Pending Checks ===${NC}"
@@ -139,12 +115,54 @@ if [ -n "$PENDING_CHECKS" ]; then
     echo -e "${YELLOW}Run this script again to check progress.${NC}"
 fi
 
+# Show PR reviews
+echo -e "${BLUE}=== Reviews ===${NC}"
+echo ""
+
+REVIEWS=$(gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.state != "PENDING") | {author: .user.login, state: .state, body: .body}' 2>/dev/null)
+
+if [ -z "$REVIEWS" ]; then
+    echo "No reviews yet."
+else
+    gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.state != "PENDING") | "\(.state)\t\(.user.login)"' 2>/dev/null | while IFS=$'\t' read -r state author; do
+        if [ "$state" = "APPROVED" ]; then
+            echo -e "  ${GREEN}✓${NC} $author (approved)"
+        elif [ "$state" = "CHANGES_REQUESTED" ]; then
+            echo -e "  ${RED}✗${NC} $author (changes requested)"
+        elif [ "$state" = "COMMENTED" ]; then
+            echo -e "  ${YELLOW}○${NC} $author (commented)"
+        else
+            echo -e "  ? $author ($state)"
+        fi
+    done
+fi
+echo ""
+
+# Show review comments count
+REVIEW_COMMENTS=$(gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER/comments" 2>/dev/null)
+COMMENT_COUNT=$(echo "$REVIEW_COMMENTS" | jq 'length')
+
+if [ "$COMMENT_COUNT" -gt 0 ]; then
+    echo -e "${YELLOW}=== Review Comments ($COMMENT_COUNT) ===${NC}"
+    echo ""
+
+    echo "$REVIEW_COMMENTS" | jq -r '.[] | "[\(.path | split("/") | last):\(.line // .original_line // "?")] \(.body | split("\n")[0] | if length > 80 then .[0:77] + "..." else . end)"' | head -20
+
+    if [ "$COMMENT_COUNT" -gt 20 ]; then
+        echo ""
+        echo "... and $((COMMENT_COUNT - 20)) more comments"
+    fi
+    echo ""
+fi
+
 # Summary
 echo ""
-if [ "$FAILED" -gt 0 ]; then
+FAILED=${FAILED:-0}
+PENDING=${PENDING:-0}
+if [ "$FAILED" -gt 0 ] 2>/dev/null; then
     echo -e "${RED}CI Status: FAILED${NC}"
     exit 1
-elif [ "$PENDING" -gt 0 ]; then
+elif [ "$PENDING" -gt 0 ] 2>/dev/null; then
     echo -e "${YELLOW}CI Status: IN PROGRESS${NC}"
     exit 0
 else
