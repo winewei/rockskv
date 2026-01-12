@@ -82,7 +82,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - name: Checkout code
@@ -93,96 +93,57 @@ jobs:
       with:
         go-version: ${{ env.GO_VERSION }}
         cache: true
+
+    # RocksDB installation is required for golangci-lint because:
+    # 1. The codebase uses grocksdb (CGO bindings to RocksDB)
+    # 2. golangci-lint needs CGO headers for type checking
+    # 3. Some linters (like staticcheck) require full type information
+    # Cache is shared with build-cgo job to minimize build time (~2 min with cache hit)
+    - name: Install RocksDB dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          libgflags-dev \
+          libsnappy-dev \
+          zlib1g-dev \
+          libbz2-dev \
+          liblz4-dev \
+          libzstd-dev
+
+    - name: Cache RocksDB
+      id: cache-rocksdb
+      uses: actions/cache@v4
+      with:
+        path: ~/rocksdb-${{ env.ROCKSDB_VERSION }}
+        key: rocksdb-${{ env.ROCKSDB_VERSION }}-ubuntu-24.04-v1
+
+    - name: Build RocksDB from source
+      if: steps.cache-rocksdb.outputs.cache-hit != 'true'
+      run: |
+        cd ~
+        git clone --depth 1 --branch v${{ env.ROCKSDB_VERSION }} https://github.com/facebook/rocksdb.git rocksdb-${{ env.ROCKSDB_VERSION }}
+        cd rocksdb-${{ env.ROCKSDB_VERSION }}
+        make shared_lib -j$(nproc)
+
+    - name: Install RocksDB
+      run: |
+        cd ~/rocksdb-${{ env.ROCKSDB_VERSION }}
+        sudo make install-shared INSTALL_PATH=/usr/local
+        sudo ldconfig
 
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v7
       with:
         version: v2.0.2
         args: --timeout=5m
+      env:
+        CGO_ENABLED: 1
+        CGO_CFLAGS: -I/usr/local/include
+        CGO_LDFLAGS: -L/usr/local/lib
 
-  build-linux-binaries:
-    name: Build Linux Binaries
-    runs-on: ubuntu-latest
-    needs: [build-cgo, lint]
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
-        cache: true
-
-    - name: Build Linux binaries
-      run: |
-        make build-linux-amd64
-        make build-linux-arm64
-
-    - name: Create archives
-      run: |
-        cd bin
-        tar -czvf rockskv-linux-amd64.tar.gz -C linux-amd64 .
-        tar -czvf rockskv-linux-arm64.tar.gz -C linux-arm64 .
-
-    - name: Upload Linux AMD64
-      uses: actions/upload-artifact@v4
-      with:
-        name: rockskv-linux-amd64
-        path: bin/rockskv-linux-amd64.tar.gz
-        retention-days: 30
-
-    - name: Upload Linux ARM64
-      uses: actions/upload-artifact@v4
-      with:
-        name: rockskv-linux-arm64
-        path: bin/rockskv-linux-arm64.tar.gz
-        retention-days: 30
-
-  build-darwin-binaries:
-    name: Build Darwin Binaries (Signed)
-    runs-on: macos-latest
-    needs: [build-cgo, lint]
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
-        cache: true
-
-    - name: Build and sign Darwin binaries
-      run: |
-        make build-darwin-amd64
-        make build-darwin-arm64
-
-    - name: Create archives
-      run: |
-        cd bin
-        tar -czvf rockskv-darwin-amd64.tar.gz -C darwin-amd64 .
-        tar -czvf rockskv-darwin-arm64.tar.gz -C darwin-arm64 .
-
-    - name: Upload Darwin AMD64
-      uses: actions/upload-artifact@v4
-      with:
-        name: rockskv-darwin-amd64
-        path: bin/rockskv-darwin-amd64.tar.gz
-        retention-days: 30
-
-    - name: Upload Darwin ARM64 (Apple Silicon)
-      uses: actions/upload-artifact@v4
-      with:
-        name: rockskv-darwin-arm64
-        path: bin/rockskv-darwin-arm64.tar.gz
-        retention-days: 30
+  # Note: Cross-platform binary builds removed - RocksKV requires CGO and RocksDB
+  # For distribution, use Docker images (make docker-build) or build on target platform
 
   # SDK Build Verification
   sdk-build:

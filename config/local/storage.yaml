@@ -3,6 +3,8 @@ node_id: "storage-1"
 listen_addr: ":9001"
 metadata_addr: "localhost:9000"
 sst_dir: "./data/sst"
+etcd_endpoints:
+  - "localhost:2379"
 
 # RocksDB Configuration
 rocksdb:

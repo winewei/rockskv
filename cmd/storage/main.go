@@ -86,7 +86,9 @@ func loadConfig(path string) (*storage.ServerConfig, error) {
 	viper.SetDefault("node_id", "storage-1")
 	viper.SetDefault("listen_addr", ":9001")
 	viper.SetDefault("metadata_addr", "localhost:9000")
+	viper.SetDefault("etcd_endpoints", []string{"localhost:2379"})
 	viper.SetDefault("sst_dir", "/tmp/rockskv/sst")
+	viper.SetDefault("command_log_dir", "/tmp/rockskv/cmdlog")
 	viper.SetDefault("rocksdb.data_dir", "/data/rockskv")
 	viper.SetDefault("rocksdb.wal_dir", "/data/rockskv/wal")
 	viper.SetDefault("rocksdb.block_cache_size", 512*1024*1024)
@@ -108,10 +110,12 @@ func loadConfig(path string) (*storage.ServerConfig, error) {
 	viper.AutomaticEnv()
 
 	config := &storage.ServerConfig{
-		NodeID:       viper.GetString("node_id"),
-		ListenAddr:   viper.GetString("listen_addr"),
-		MetadataAddr: viper.GetString("metadata_addr"),
-		SSTDir:       viper.GetString("sst_dir"),
+		NodeID:        viper.GetString("node_id"),
+		ListenAddr:    viper.GetString("listen_addr"),
+		MetadataAddr:  viper.GetString("metadata_addr"),
+		EtcdEndpoints: viper.GetStringSlice("etcd_endpoints"),
+		SSTDir:        viper.GetString("sst_dir"),
+		CommandLogDir: viper.GetString("command_log_dir"),
 		RocksDB: &storage.RocksDBConfig{
 			DataDir:                  viper.GetString("rocksdb.data_dir"),
 			WALDir:                   viper.GetString("rocksdb.wal_dir"),

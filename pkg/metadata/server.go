@@ -275,6 +275,7 @@ func (s *Server) GetRouteTable(ctx context.Context, req *pb.GetRouteTableRequest
 			Status:          convertPartitionStatus(partition.Status),
 			MigrationTarget: partition.MigrationTarget,
 			MigrationState:  partition.MigrationState,
+			Epoch:           partition.Epoch,
 		})
 	}
 
@@ -346,6 +347,7 @@ func (s *Server) sendRouteUpdate(stream pb.MetadataService_SubscribeRouteUpdates
 			Status:          convertPartitionStatus(partition.Status),
 			MigrationTarget: partition.MigrationTarget,
 			MigrationState:  partition.MigrationState,
+			Epoch:           partition.Epoch,
 		})
 	}
 

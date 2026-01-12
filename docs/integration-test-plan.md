@@ -114,36 +114,28 @@ Integration Tests
 **状态**: ⚠️ 部分完成 (2026-01-12)
 
 **测试用例**：
-- [ ] TestSSTExport：从源节点导出 SST 文件 (已实现但跳过 - 分区分配时序问题)
-- [ ] TestSSTImport：目标节点导入 SST 文件 (已实现但跳过 - 同上)
+- [x] TestSSTExport：从源节点导出 SST 文件 ✅ 已修复通过
+- [x] TestSSTImport：目标节点导入 SST 文件 ✅ 已修复通过
 - [ ] TestMigrationTriggerRebalance：触发重平衡迁移 (已跳过 - 需要 MigrationController)
 - [ ] TestMigrationCancel：取消进行中的迁移 (已跳过 - 待实现)
 - [ ] TestConcurrentMigrations：并发迁移多个分区 (已跳过 - 待实现)
 
 **测试结果**：
-- 5 个测试全部跳过 (Skipped)
-- 执行时间：~0 秒
-- 覆盖场景：测试框架已搭建，但遇到技术障碍
+- 2 个测试通过，3 个测试跳过
+- 执行时间：~128 秒（约 2 分钟）
+- 覆盖场景：SST 导出和导入功能验证
 
-**已知问题**：
-1. **分区分配时序问题**：
-   - InitCluster 后分区未正确分配到存储节点
-   - ExportSST 报错：`partition 0 not found`
-   - 可能原因：路由表传播延迟、单节点集群初始化逻辑、订阅机制
-
-2. **需要进一步调查**：
-   - 存储节点订阅路由表更新的时序
-   - InitCluster 在单节点场景下的分区分配逻辑
-   - PartitionManager 添加分区的触发机制
+**已修复问题** (2026-01-12)：
+1. **Epoch 字段缺失**：`GetRouteTable` 和 `sendRouteUpdate` 返回的分区信息缺少 Epoch 字段
+2. **MinReplicaNodes 要求**：测试需要至少 2 个存储节点才能初始化集群
+3. **时序问题**：改为让 Storage 节点自动注册，而非测试代码手动注册
 
 **依赖**：
 - etcd (localhost:2379)
 - Metadata Server (非 HA 模式)
-- 1-2 个 Storage 节点
+- 2 个 Storage 节点
 
 **下一步**：
-- 调试分区分配机制，理解 InitCluster → RouteTable → PartitionManager 的完整流程
-- 增加适当的等待时间或轮询机制确保分区已分配
 - 实现 MigrationController 相关测试
 - 实现迁移取消和并发迁移测试
 
@@ -353,7 +345,7 @@ test-integration-e2e:
 - ✅ Metadata HA: 1 个测试文件，7 个集成测试
 - ✅ Metadata Route Table: 1 个测试文件，5 个集成测试（4个通过，1个跳过）
 - ✅ Metadata Node Registration: 1 个测试文件，5 个集成测试
-- ⚠️ Migration: 1 个测试文件，5 个测试（全部跳过 - 分区分配时序问题）
+- ⚠️ Migration: 1 个测试文件，5 个测试（2个通过，3个跳过）
 - ⚠️ Compute-Storage: 1 个测试文件，4 个测试（全部跳过 - 待实现）
 - ⚠️ E2E: 1 个测试文件，5 个测试（全部跳过 - 待实现）
 - ✅ Makefile 更新：支持 ./pkg/storage/... 和 ./pkg/metadata/... 和 ./test/integration/...
@@ -361,23 +353,23 @@ test-integration-e2e:
 
 **测试统计**：
 - 总测试文件：9 个
-- 总测试用例：38 个（23个通过，15个跳过）
-- 执行时间：~45 秒（通过的测试，包含 etcd 启动和清理）
+- 总测试用例：38 个（25个通过，13个跳过）
+- 执行时间：~175 秒（约 3 分钟，通过的测试，包含 etcd 启动和清理）
 - 框架完成度：100%（所有 5 个阶段的测试框架已搭建）
-- 实现完成度：60%（23/38 测试实现并通过）
+- 实现完成度：66%（25/38 测试实现并通过）
 
 **测试框架已搭建但待实现**：
-- ⚠️ 分区迁移集成测试 - 5个测试跳过（需解决分区分配时序问题）
-- ⚠️ Compute-Storage 集成测试 - 4个测试跳过（依赖迁移测试修复）
+- ⚠️ 分区迁移集成测试 - 3个测试跳过（TestSSTExport 和 TestSSTImport 已通过）
+- ⚠️ Compute-Storage 集成测试 - 4个测试跳过（待实现）
 - ⚠️ E2E 集成测试 - 5个测试跳过（最复杂场景，现有 smoke-test.sh 提供基本覆盖）
 
 **关键里程碑**：
 - ✅ 所有 5 个测试阶段的框架已完成
 - ✅ Storage 和 Metadata 层测试全部通过
-- ⚠️ Migration/Compute/E2E 层遇到技术挑战，已文档化解决路径
+- ✅ Migration TestSSTExport 和 TestSSTImport 已修复并通过（2026-01-12）
 - ✅ 每个跳过的测试都包含详细的TODO和实现计划
 
-**进度**：38 个测试框架完成 / 23 个测试实现通过 (框架 100% 完成，实现 60% 完成)
+**进度**：38 个测试框架完成 / 25 个测试实现通过 (框架 100% 完成，实现 66% 完成)
 
 ---
 

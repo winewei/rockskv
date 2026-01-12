@@ -91,6 +91,28 @@ ldconfig -p | grep rocksdb
 # Should show: librocksdb.so.10.7 => /usr/local/lib/librocksdb.so.10.7
 ```
 
+#### IDE Configuration (VS Code / GoLand)
+
+IDE language servers (gopls) may show false compilation errors because they don't inherit Makefile's CGO environment variables. Add these to your shell profile:
+
+**macOS (add to ~/.zshrc or ~/.bashrc):**
+```bash
+# RocksDB CGO configuration for IDE
+export CGO_ENABLED=1
+export CGO_CFLAGS="-I$(brew --prefix)/include"
+export CGO_LDFLAGS="-L$(brew --prefix)/lib"
+```
+
+**Linux (add to ~/.bashrc):**
+```bash
+# RocksDB CGO configuration for IDE
+export CGO_ENABLED=1
+export CGO_CFLAGS="-I/usr/local/include"
+export CGO_LDFLAGS="-L/usr/local/lib"
+```
+
+After adding, restart your terminal and IDE. Note: `make build` and `make test` work correctly without this - it only affects IDE diagnostics.
+
 #### Troubleshooting RocksDB
 
 If you encounter linking errors, ensure old versions are removed:
