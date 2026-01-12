@@ -59,13 +59,13 @@ run_test() {
 
     if echo "$result" | grep -q "$expected"; then
         echo -e "${GREEN}PASS${NC}"
-        ((PASSED++))
+        PASSED=$((PASSED + 1))
         return 0
     else
         echo -e "${RED}FAIL${NC}"
         echo "    Expected: $expected"
         echo "    Got: $result"
-        ((FAILED++))
+        FAILED=$((FAILED + 1))
         return 1
     fi
 }
@@ -81,13 +81,13 @@ run_test_exact() {
 
     if [ "$result" = "$expected" ]; then
         echo -e "${GREEN}PASS${NC}"
-        ((PASSED++))
+        PASSED=$((PASSED + 1))
         return 0
     else
         echo -e "${RED}FAIL${NC}"
         echo "    Expected: '$expected'"
         echo "    Got: '$result'"
-        ((FAILED++))
+        FAILED=$((FAILED + 1))
         return 1
     fi
 }
@@ -106,7 +106,7 @@ wait_for_service() {
         fi
         echo -n "."
         sleep 1
-        ((attempt++))
+        attempt=$((attempt + 1))
     done
     echo -e " ${RED}TIMEOUT${NC}"
     return 1
