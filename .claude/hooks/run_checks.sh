@@ -9,7 +9,11 @@ if git diff --quiet && git diff --cached --quiet; then
 fi
 
 # 你要的质量门禁
-make lint
+if command -v golangci-lint &> /dev/null; then
+  make lint
+else
+  echo "⚠️  golangci-lint not installed, skipping lint (brew install golangci-lint)"
+fi
 make test
 make test-integration
 make test-integration-cleanup
